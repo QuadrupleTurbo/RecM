@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
+      <LangVersion>latest</LangVersion>
       <TargetFramework>netstandard2.0</TargetFramework>
       <DebugType>portable</DebugType>
       <TargetName>$(AssemblyName).net</TargetName>
@@ -11,5 +12,43 @@
   
       <Compile Include="../Shared/**/*.cs" />
     </ItemGroup>
+  
+    <ItemGroup>
+      <Compile Remove="..\Shared\Dummy.cs" />
+    </ItemGroup>
+  
+    <ItemGroup>
+      <Reference Include="CodeWalker.Core">
+        <HintPath>..\_dependencies\Server\CodeWalker.Core.dll</HintPath>
+      </Reference>
+      <Reference Include="FxEvents.Server">
+        <HintPath>..\_dependencies\Server\FxEvents.Server.dll</HintPath>
+      </Reference>
+      <Reference Include="Newtonsoft.Json">
+        <HintPath>..\_dependencies\Newtonsoft.Json.dll</HintPath>
+      </Reference>
+      <Reference Include="SharpDX">
+        <HintPath>..\_dependencies\Server\SharpDX.dll</HintPath>
+      </Reference>
+      <Reference Include="SharpDX.Mathematics">
+        <HintPath>..\_dependencies\Server\SharpDX.Mathematics.dll</HintPath>
+      </Reference>
+    </ItemGroup>
+  
+    <ItemGroup>
+      <Folder Include="Classes\" />
+      <Folder Include="Utils\" />
+    </ItemGroup>
+  
+    <ItemGroup>
+      <Compile Update="..\Shared\Json.cs" Link="Utils\Json.cs" />
+      <Compile Update="..\Shared\Logger.cs" Link="Utils\Logger.cs" />
+      <Compile Update="..\Shared\Record.cs" Link="Classes\Record.cs" />
+      <Compile Update="..\Shared\Recording.cs" Link="Classes\Recording.cs" />
+    </ItemGroup>
+  
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="$(SolutionDir)build.bat &quot;$(TargetDir)$(TargetFileName)&quot; &quot;Server&quot;" />
+    </Target>
 </Project>
   

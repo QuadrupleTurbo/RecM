@@ -1,5 +1,36 @@
 <Project Sdk="CitizenFX.Sdk.Client/0.2.3">
+    <PropertyGroup>
+      <LangVersion>latest</LangVersion>
+      <DebugType>embedded</DebugType>
+    </PropertyGroup>
     <ItemGroup>
         <Compile Include="../Shared/**/*.cs" />
     </ItemGroup>
+    <ItemGroup>
+      <Compile Remove="..\Shared\Dummy.cs" />
+    </ItemGroup>
+    <ItemGroup>
+      <PackageReference Include="ScaleformUI" Version="5.3.0" />
+    </ItemGroup>
+    <ItemGroup>
+      <Reference Include="FxEvents.Client">
+        <HintPath>..\_dependencies\Client\FxEvents.Client.dll</HintPath>
+      </Reference>
+      <Reference Include="Newtonsoft.Json">
+        <HintPath>..\_dependencies\Newtonsoft.Json.dll</HintPath>
+      </Reference>
+    </ItemGroup>
+    <ItemGroup>
+      <Folder Include="Menus\" />
+      <Folder Include="Utils\" />
+    </ItemGroup>
+    <ItemGroup>
+      <Compile Update="..\Shared\Json.cs" Link="Utils\Json.cs" />
+      <Compile Update="..\Shared\Logger.cs" Link="Utils\Logger.cs" />
+      <Compile Update="..\Shared\Record.cs" Link="Classes\Record.cs" />
+      <Compile Update="..\Shared\Recording.cs" Link="Classes\Recording.cs" />
+    </ItemGroup>
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="$(SolutionDir)build.bat &quot;$(TargetDir)$(TargetFileName)&quot; &quot;Client&quot;" />
+    </Target>
 </Project>
