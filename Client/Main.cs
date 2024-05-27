@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using CitizenFX.Core;
+using CitizenFX.Core.Native;
 using FxEvents;
 
 namespace RecM.Client
