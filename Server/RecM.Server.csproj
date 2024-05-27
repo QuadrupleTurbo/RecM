@@ -9,6 +9,7 @@
   
     <ItemGroup>
       <PackageReference Include="CitizenFX.Core.Server" Version="1.0.*" />
+      <PackageReference Include="FxEvents.Server" Version="2.9.1" />
   
       <Compile Include="../Shared/**/*.cs" />
     </ItemGroup>
@@ -20,9 +21,6 @@
     <ItemGroup>
       <Reference Include="CodeWalker.Core">
         <HintPath>..\_dependencies\Server\CodeWalker.Core.dll</HintPath>
-      </Reference>
-      <Reference Include="FxEvents.Server">
-        <HintPath>..\_dependencies\Server\FxEvents.Server.dll</HintPath>
       </Reference>
       <Reference Include="Newtonsoft.Json">
         <HintPath>..\_dependencies\Newtonsoft.Json.dll</HintPath>
