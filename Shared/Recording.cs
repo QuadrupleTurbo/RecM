@@ -140,6 +140,9 @@ namespace RecM
                     "Invalid command.".Error();
                 }
             }), false);
+
+            // Only at startup
+            LoadTextures();
         }
 
 #endif
@@ -158,7 +161,7 @@ namespace RecM
 
 #endif
 
-        #endregion
+#endregion
 
         #region Events
 
@@ -516,6 +519,23 @@ namespace RecM
             }
 
             return recordings;
+        }
+
+        #endregion
+
+        #region Load textures
+
+        /// <summary>
+        /// Loads the textures that are supplied with the resource.
+        /// </summary>
+        private async void LoadTextures()
+        {
+            var currTime = Main.GameTime;
+            while (!API.HasStreamedTextureDictLoaded("recm_textures") && Main.GameTime - currTime < 7000) // With a timeout of 7 seconds
+            {
+                API.RequestStreamedTextureDict("recm_textures", false);
+                await BaseScript.Delay(0);
+            }
         }
 
         #endregion
