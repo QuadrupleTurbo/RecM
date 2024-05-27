@@ -55,6 +55,26 @@ namespace RecM.Client
 
         #endregion
 
+        #region Attach tick statically
+
+        public void AttachTick(Func<Task> task)
+        {
+            Tick += task;
+            $"Attached tick: {task.Method.Name}".Log();
+        }
+
+        #endregion
+
+        #region Detach tick statically
+
+        public void DetachTick(Func<Task> task)
+        {
+            Tick -= task;
+            $"Detached tick: {task.Method.Name}".Log();
+        }
+
+        #endregion
+
         #endregion
     }
 } 
