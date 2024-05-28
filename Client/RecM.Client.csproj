@@ -20,9 +20,6 @@
       </Reference>
     </ItemGroup>
     <ItemGroup>
-      <Folder Include="Utils\" />
-    </ItemGroup>
-    <ItemGroup>
       <Compile Update="..\Shared\Json.cs" Link="Utils\Json.cs" />
       <Compile Update="..\Shared\Logger.cs" Link="Utils\Logger.cs" />
       <Compile Update="..\Shared\Record.cs" Link="Classes\Record.cs" />
