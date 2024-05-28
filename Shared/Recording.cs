@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 
 #if CLIENT
 
@@ -9,6 +10,7 @@ using RecM.Client;
 using CitizenFX.Core;
 using CitizenFX.Core.Native;
 using FxEvents;
+using RecM.Client.Utils;
 
 #endif
 
@@ -20,6 +22,7 @@ using RecM.Server;
 using CodeWalker.GameFiles;
 using CitizenFX.Core.Native;
 using CitizenFX.Core;
+using FxEvents;
 
 #endif
 
@@ -41,6 +44,16 @@ namespace RecM
         /// </summary>
         private static int _recordingStartTime;
 
+        /// <summary>
+        /// To indicate if the recording is loaded or not.
+        /// </summary>
+        public static bool LoadingRecording;
+
+        /// <summary>
+        /// The last recording played, key being the id, and value being the name.
+        /// </summary>
+        private static Tuple<int, string> _lastRecordingPlayed;
+
 #endif
 
         #endregion
@@ -51,7 +64,9 @@ namespace RecM
 
         public Recording()
         {
-            API.RegisterCommand("record", new Action<int, List<object>, string>(async (source, args, rawCommand) =>
+            Main.Instance.AddEventHandler("RecM:registerRecording:Client", new Action<string, string>(RegisterRecording));
+
+            API.RegisterCommand("recm", new Action<int, List<object>, string>(async (source, args, rawCommand) =>
             {
                 if (args[0].ToString() == "start")
                 {
@@ -126,14 +141,18 @@ namespace RecM
                 else if (args[0].ToString() == "get")
                 {
                     var recordings = await GetRecordings();
-                    
-                    if (recordings.Count == 0)
+
+                    if (recordings.Item1.Count == 0 && recordings.Item2.Count == 0)
                     {
                         "There are no recordings.".Error();
                         return;
-                    }   
+                    }
 
-                    string.Join("\n", recordings).Log();
+                    $"Vanilla\n{string.Join("\n", recordings.Item1)}\n\nCustom: {string.Join("\n", recordings.Item2)}".Log();
+                }
+                else if (args[0].ToString() == "play")
+                {
+
                 }
                 else
                 {
@@ -154,6 +173,7 @@ namespace RecM
             Main.Instance.AddEventHandler("RecM:saveRecording:Server", new Action<string, string, string, bool, NetworkCallbackDelegate>(SaveRecording), true);
             Main.Instance.AddEventHandler("RecM:deleteRecording:Server", new Func<Player, string, string, Task<Tuple<bool, string>>>(DeleteRecording));
             Main.Instance.AddEventHandler("RecM:getRecordings:Server", new Func<Player, Task<List<string>>>(GetRecordings));
+            Main.Instance.AddEventHandler("RecM:openMenu:Server", new Func<Player, Task<bool>>(OpenMenu));
 
             // Only at startup
             CleanRecordings();
@@ -161,9 +181,22 @@ namespace RecM
 
 #endif
 
-#endregion
+        #endregion
 
         #region Events
+
+#if CLIENT
+
+        #region Register recording
+
+        private void RegisterRecording(string name, string cacheString)
+        {
+            API.RegisterStreamingFileFromCache("RecM_records", name, cacheString);
+        }
+
+        #endregion
+
+#endif
 
 #if SERVER
 
@@ -205,30 +238,30 @@ namespace RecM
 
                     // Position
                     XmlElement posElement = doc.CreateElement("Position");
-                    posElement.SetAttribute("x", recording.Position.X.ToString());
-                    posElement.SetAttribute("y", recording.Position.Y.ToString());
-                    posElement.SetAttribute("z", recording.Position.Z.ToString());
+                    posElement.SetAttribute("x", recording.Position.X.ToString("F4"));
+                    posElement.SetAttribute("y", recording.Position.Y.ToString("F4"));
+                    posElement.SetAttribute("z", recording.Position.Z.ToString("F4"));
                     itemElement.AppendChild(posElement);
 
                     // Velocity
                     XmlElement velElement = doc.CreateElement("Velocity");
-                    velElement.SetAttribute("x", recording.Velocity.X.ToString());
-                    velElement.SetAttribute("y", recording.Velocity.Y.ToString());
-                    velElement.SetAttribute("z", recording.Velocity.Z.ToString());
+                    velElement.SetAttribute("x", recording.Velocity.X.ToString("F4"));
+                    velElement.SetAttribute("y", recording.Velocity.Y.ToString("F4"));
+                    velElement.SetAttribute("z", recording.Velocity.Z.ToString("F4"));
                     itemElement.AppendChild(velElement);
 
                     // Top/Forward
                     XmlElement topElement = doc.CreateElement("Forward");
-                    topElement.SetAttribute("x", recording.Forward.X.ToString());
-                    topElement.SetAttribute("y", recording.Forward.Y.ToString());
-                    topElement.SetAttribute("z", recording.Forward.Z.ToString());
+                    topElement.SetAttribute("x", recording.Forward.X.ToString("F4"));
+                    topElement.SetAttribute("y", recording.Forward.Y.ToString("F4"));
+                    topElement.SetAttribute("z", recording.Forward.Z.ToString("F4"));
                     itemElement.AppendChild(topElement);
 
                     // Right
                     XmlElement rightElement = doc.CreateElement("Right");
-                    rightElement.SetAttribute("x", recording.Right.X.ToString());
-                    rightElement.SetAttribute("y", recording.Right.Y.ToString());
-                    rightElement.SetAttribute("z", recording.Right.Z.ToString());
+                    rightElement.SetAttribute("x", recording.Right.X.ToString("F4"));
+                    rightElement.SetAttribute("y", recording.Right.Y.ToString("F4"));
+                    rightElement.SetAttribute("z", recording.Right.Z.ToString("F4"));
                     itemElement.AppendChild(rightElement);
 
                     // Steering
@@ -263,7 +296,11 @@ namespace RecM
                 // Move it to the recordings resource
                 var recordingsPath = Path.Combine(API.GetResourcePath("RecM_records"), "stream");
                 if (!File.Exists(Path.Combine(recordingsPath, $"{name}_{model}_001.yvr")))
+                {
                     File.WriteAllBytes(Path.Combine(recordingsPath, $"{name}_{model}_001.yvr"), yvrData);
+                    var cacheString = API.RegisterResourceAsset("RecM_records", $"stream/{name}_{model}_001.yvr");
+                    EventDispatcher.Send(Main.Instance.Clients, "RecM:registerRecording:Client", $"{name}_{model}_001.yvr", cacheString);
+                }
                 else
                 {
                     // Optional depending on the context
@@ -275,8 +312,10 @@ namespace RecM
                             .Select(x => int.Parse(Path.GetFileNameWithoutExtension(x).Split('_')[2]))
                             .Max();
                         File.WriteAllBytes(Path.Combine(recordingsPath, $"{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr"), yvrData);
+                        var cacheString = API.RegisterResourceAsset("RecM_records", $"stream/{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr");
+                        EventDispatcher.Send(Main.Instance.Clients, "RecM:registerRecording:Client", $"{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr", cacheString);
                     }
-                    else                     
+                    else
                     {
                         cb(false, "A recording with this name and model already exists.");
                         return;
@@ -284,8 +323,8 @@ namespace RecM
                 }
 
                 // Finally, refresh and restart the recordings resource (hopefully no problems client side)
-                API.ExecuteCommand("refresh");
-                API.ExecuteCommand("ensure RecM_records");
+                //API.ExecuteCommand("refresh");
+                //API.ExecuteCommand("ensure RecM_records");
 
                 // Callback telling the client that the recording was saved
                 cb(true, "Success!");
@@ -354,21 +393,27 @@ namespace RecM
 
                 // The path to the recordings
                 var recordingsPath = Path.Combine(API.GetResourcePath("RecM_records"), "stream");
+                if (!Directory.Exists(recordingsPath))
+                    Directory.CreateDirectory(recordingsPath);
 
-                // Find all files that start with the name and model
+                // For custom recordings, find all files that start with the name and model
                 List<string> recordings = [];
                 foreach (var file in Directory.EnumerateFiles(recordingsPath))
                 {
+                    // Just to be safe
+                    if (!Path.GetFileNameWithoutExtension(file).Contains("_"))
+                        continue;
+
                     var name = Path.GetFileNameWithoutExtension(file).Split('_')[0];
                     var model = Path.GetFileNameWithoutExtension(file).Split('_')[1];
-                    var num = Path.GetFileNameWithoutExtension(file).Split('_')[2];
+                    var id = Path.GetFileNameWithoutExtension(file).Split('_')[2];
                     var maxValue = Directory.EnumerateFiles(recordingsPath)
                         .Where(x => Path.GetFileNameWithoutExtension(x).StartsWith($"{name}_{model}"))
                         .Select(x => int.Parse(Path.GetFileNameWithoutExtension(x).Split('_')[2]))
                         .Max();
 
                     // Disregard the duplicates that are below the highest id
-                    if (num == maxValue.ToString().PadLeft(3, '0'))
+                    if (id == maxValue.ToString().PadLeft(3, '0'))
                         recordings.Add(Path.GetFileNameWithoutExtension(file));
                 }
 
@@ -379,6 +424,18 @@ namespace RecM
                 ex.ToString().Error();
                 return [];
             }
+        }
+
+        #endregion
+
+        #region Open menu
+
+        private async Task<bool> OpenMenu([FromSource] Player source)
+        {
+            if (!API.IsPlayerAceAllowed(source.Handle, $"RecM.openMenu"))
+                return false;
+
+            return true;
         }
 
         #endregion
@@ -394,7 +451,7 @@ namespace RecM
         private async Task RecordingThread()
         {
             RecordThisFrame();
-            await BaseScript.Delay(0);
+            await BaseScript.Delay(1);
         }
 
 #endif
@@ -506,19 +563,110 @@ namespace RecM
 
         #region Get recordings
 
-        public static async Task<List<string>> GetRecordings()
+        public static async Task<Tuple<List<string>, List<string>>> GetRecordings()
         {
-            // Get the list of recordings
-            List<string> recordings = await EventDispatcher.Get<List<string>>("RecM:getRecordings:Server");
+            // Declare the list that will hold the recordings
+            List<string> vanilla = [];
 
-            // The server will return the default value if there's an error
-            if (recordings == default)
+            // Now let's load the vanilla recordings
+            var json = API.LoadResourceFile("RecM_records", "vanilla.json");
+            if (string.IsNullOrEmpty(json))
+                vanilla = Client.data.yvrs.backupVanillaYvrs;
+            else
             {
-                "There was an error with getting the recordings, please check the server console for an exception.".Error();
-                return default;
+                foreach (var item in Json.Parse<JArray>(json))
+                    vanilla.Add(item.ToString());
             }
 
-            return recordings;
+            // Get the list of custom recordings
+            List<string> custom = await EventDispatcher.Get<List<string>>("RecM:getRecordings:Server");
+
+            return new Tuple<List<string>, List<string>>(vanilla, custom);
+        }
+
+        #endregion
+
+        #region Play recording
+
+        public async static void PlayRecording(int id, string name, string model = null)
+        {
+            try
+            {
+                Vehicle veh;
+                if (model != null)
+                {
+                    // Get the current vehicle for a backup if it exists
+                    Vehicle backupVeh = null;
+                    if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null)
+                        backupVeh = Game.PlayerPed.CurrentVehicle;
+
+                    // Check if the model exists
+                    if (API.IsModelInCdimage(Game.GenerateHashASCII(model)))
+                        veh = await Tools.SpawnVehicle(model, false);
+                    else
+                    {
+                        // Since the model doesn't exist, we'll use the backup vehicle if it exists, otherwise we'll use the default vehicle
+                        if (backupVeh != null)
+                        {
+                            $"The model {model} for this recording doesn't exist, using your current vehicle instead...".Error();
+                            veh = backupVeh;
+                        }
+                        else
+                        {
+                            $"The model {model} for this recording doesn't exist, using the default vehicle instead...".Error();
+                            veh = await Tools.SpawnVehicle("elegy", false);
+                        }
+                    }
+                }
+                else
+                    veh = Game.PlayerPed.CurrentVehicle;
+
+                // prevent spamming the recording
+                LoadingRecording = true;
+
+                // Stop the playback if it's going on
+                if (API.IsPlaybackGoingOnForVehicle(veh.Handle))
+                    API.StopPlaybackRecordedVehicle(veh.Handle);
+
+                // Remove the old recording from memory
+                if (_lastRecordingPlayed != null)
+                    API.RemoveVehicleRecording(_lastRecordingPlayed.Item1, _lastRecordingPlayed.Item2);
+
+                // Load the recording with a function call, because the FiveM native doesn't take the name parameter
+                API.RequestVehicleRecording(id, name);
+                var currTime = Main.GameTime;
+                while (!Function.Call<bool>(Hash.HAS_VEHICLE_RECORDING_BEEN_LOADED, id, name) && Main.GameTime - currTime < 7000) // With a timeout of 7 seconds
+                    await BaseScript.Delay(0);
+
+                // It might not have loaded, so let's stop here
+                if (!Function.Call<bool>(Hash.HAS_VEHICLE_RECORDING_BEEN_LOADED, id, name))
+                {
+                    "The recording failed to load.".Error();
+                    LoadingRecording = false;
+                    _lastRecordingPlayed = null;
+                    return;
+                }
+
+                // Play the recording
+                API.StartPlaybackRecordedVehicle(veh.Handle, id, name, true);
+
+                // Store it as our last used recording
+                _lastRecordingPlayed = new Tuple<int, string>(id, name);
+
+                // Reset it
+                LoadingRecording = false;
+
+                // Fix the camera
+                await BaseScript.Delay(1000);
+                GameplayCamera.RelativePitch = 4;
+                GameplayCamera.RelativeHeading = 0;
+            }
+            catch (Exception ex)
+            {
+                $"The recording failed to load.\n\n{ex}".Error();
+                LoadingRecording = false;
+                _lastRecordingPlayed = null;
+            }
         }
 
         #endregion
@@ -568,9 +716,13 @@ namespace RecM
                 List<string> filesToDestroy = [];
                 foreach (var file in Directory.EnumerateFiles(recordingsPath))
                 {
+                    // Just to be safe
+                    if (!Path.GetFileNameWithoutExtension(file).Contains("_"))
+                        continue;
+
                     var name = Path.GetFileNameWithoutExtension(file).Split('_')[0];
                     var model = Path.GetFileNameWithoutExtension(file).Split('_')[1];
-                    var num = Path.GetFileNameWithoutExtension(file).Split('_')[2];
+                    var id = Path.GetFileNameWithoutExtension(file).Split('_')[2];
                     var maxValue = Directory.EnumerateFiles(recordingsPath)
                         .Where(x => Path.GetFileNameWithoutExtension(x).StartsWith($"{name}_{model}"))
                         .Select(x => int.Parse(Path.GetFileNameWithoutExtension(x).Split('_')[2]))
@@ -578,7 +730,7 @@ namespace RecM
                         .Max();
 
                     // Delete the file if there's a duplicate with a lower recording id
-                    if (num != maxValue.ToString().PadLeft(3, '0'))
+                    if (id != maxValue.ToString().PadLeft(3, '0'))
                     {
                         File.Delete(file);
                         continue;
