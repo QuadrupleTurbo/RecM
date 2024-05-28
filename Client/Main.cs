@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using CitizenFX.Core;
 using CitizenFX.Core.Native;
 using FxEvents;
+using RecM.Client.Menus;
 
 namespace RecM.Client
 {
@@ -37,6 +38,7 @@ namespace RecM.Client
 
             // Load classes
             new Recording();
+            new RecordingManager();
         }
 
         #endregion
@@ -71,6 +73,16 @@ namespace RecM.Client
         {
             Tick -= task;
             $"Detached tick: {task.Method.Name}".Log();
+        }
+
+        #endregion
+
+        #region Register key mapping
+
+        public void RegisterKeyMapping(string command, string description, string defaultKey, Delegate @delegate)
+        {
+            API.RegisterKeyMapping(command, description, "keyboard", defaultKey);
+            API.RegisterCommand("recm_menu", @delegate, false);
         }
 
         #endregion
