@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using CitizenFX.Core;
 using CitizenFX.Core.Native;
+using CitizenFX.Core.UI;
 using FxEvents;
 using RecM.Client.Menus;
 
@@ -25,6 +26,10 @@ namespace RecM.Client
 
         public static Main Instance;
         public ExportDictionary ExportList;
+        private bool _firstTick;
+        private bool _isResourceValid;
+        private readonly string _resourceName = API.GetCurrentResourceName();
+        public bool DebugMode;
 
         #endregion
 
@@ -35,10 +40,20 @@ namespace RecM.Client
             EventDispatcher.Initalize("de5WwZCPjcmx5kH2f97a", "HqDMBdqUQvFsx8ivY0sb", "gcNmjnWvG3VQRJMYXV50", "VjqQBxkkV3r4wd105W24");
             Instance = this;
             ExportList = Exports;
+            string debugMode = API.GetResourceMetadata(API.GetCurrentResourceName(), "recm_debug_mode", 0);
+            DebugMode = debugMode == "yes" || debugMode == "true" || int.TryParse(debugMode, out int num) && num > 0;
 
-            // Load classes
-            new Recording();
-            new RecordingManager();
+            if (_resourceName == "RecM")
+            {
+                // Load classes
+                new Recording();
+                new RecordingManager();
+            }
+            else
+                "The resource name is invalid, please name it to RecM!".Error(true);
+
+            // Debug
+            Screen.Fading.FadeIn(0);
         }
 
         #endregion
