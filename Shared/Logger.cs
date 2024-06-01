@@ -4,7 +4,6 @@ using System.Collections.Generic;
 #if CLIENT
 
 using CitizenFX.Core.UI;
-using FxEvents;
 using CitizenFX.Core.Native;
 using RecM.Client;
 using System.Drawing;
@@ -14,6 +13,7 @@ using System.Drawing;
 #if SERVER
 
 using System.Runtime.CompilerServices;
+using RecM.Server;
 
 #endif
 
@@ -41,36 +41,39 @@ namespace RecM
         /// General logs.
         /// </summary>
         /// <param name="msg"></param>
-        internal static void Log(this string msg, bool notify = false, bool logServerSide = false)
+        internal static void Log(this string msg, bool notify = false)
         {
             if (string.IsNullOrEmpty(msg)) return;
 
-            // Extracted each string from each "row" which would be a string separated with the \n character
-            List<string> rows = [.. msg.Split('\n')];
-
-            // Interate through the rows and fix up the strings
-            List<string> modifiedRows = [];
-            foreach (var row in rows)
+            if (Main.Instance.DebugMode)
             {
-                List<string> currRow = [];
-                foreach (var word in row.Split())
+                // Extracted each string from each "row" which would be a string separated with the \n character
+                List<string> rows = [.. msg.Split('\n')];
+
+                // Interate through the rows and fix up the strings
+                List<string> modifiedRows = [];
+                foreach (var row in rows)
                 {
-                    var yes = word.Insert(0, "^2");
-                    currRow.Add(yes);
+                    List<string> currRow = [];
+                    foreach (var word in row.Split())
+                    {
+                        var yes = word.Insert(0, "^2");
+                        currRow.Add(yes);
+                    }
+
+                    modifiedRows.Add(string.Join(" ", currRow));
                 }
 
-                modifiedRows.Add(string.Join(" ", currRow));
+                // Make a new line
+                Debug.WriteLine();
+
+                // Now let's print the rows
+                foreach (var row in modifiedRows)
+                    Debug.WriteLine($"[RecM Logs] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
+
+                // Make a new line
+                Debug.WriteLine();
             }
-
-            // Make a new line
-            Debug.WriteLine();
-
-            // Now let's print the rows
-            foreach (var row in modifiedRows)
-                Debug.WriteLine($"[RecM Logs] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
-
-            // Make a new line
-            Debug.WriteLine();
 
             if (notify)
             {
@@ -82,9 +85,6 @@ namespace RecM
                 API.SetNotificationMessage("recm_textures", "recm_notification", true, 4, "RecM", "Success");
                 API.DrawNotification(false, false);
             }
-
-            if (logServerSide)
-                EventDispatcher.Send("qdx_core:clientLogger:Server", msg);
         }
 
         #endregion
@@ -100,32 +100,35 @@ namespace RecM
         {
             if (string.IsNullOrEmpty(msg)) return;
 
-            // Extracted each string from each "row" which would be a string separated with the \n character
-            List<string> rows = [.. msg.Split('\n')];
-
-            // Interate through the rows and fix up the strings
-            List<string> modifiedRows = [];
-            foreach (var row in rows)
+            if (Main.Instance.DebugMode)
             {
-                List<string> currRow = [];
-                foreach (var word in row.Split())
+                // Extracted each string from each "row" which would be a string separated with the \n character
+                List<string> rows = [.. msg.Split('\n')];
+
+                // Interate through the rows and fix up the strings
+                List<string> modifiedRows = [];
+                foreach (var row in rows)
                 {
-                    var yes = word.Insert(0, "^5");
-                    currRow.Add(yes);
+                    List<string> currRow = [];
+                    foreach (var word in row.Split())
+                    {
+                        var yes = word.Insert(0, "^5");
+                        currRow.Add(yes);
+                    }
+
+                    modifiedRows.Add(string.Join(" ", currRow));
                 }
 
-                modifiedRows.Add(string.Join(" ", currRow));
+                // Make a new line
+                Debug.WriteLine();
+
+                // Now let's print the rows
+                foreach (var row in modifiedRows)
+                    Debug.WriteLine($"[RecM Alerts] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
+
+                // Make a new line
+                Debug.WriteLine();
             }
-
-            // Make a new line
-            Debug.WriteLine();
-
-            // Now let's print the rows
-            foreach (var row in modifiedRows)
-                Debug.WriteLine($"[RecM Alerts] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
-
-            // Make a new line
-            Debug.WriteLine();
 
             if (notify)
             {
@@ -152,32 +155,35 @@ namespace RecM
         {
             if (string.IsNullOrEmpty(msg)) return;
 
-            // Extracted each string from each "row" which would be a string separated with the \n character
-            List<string> rows = [.. msg.Split('\n')];
-
-            // Interate through the rows and fix up the strings
-            List<string> modifiedRows = [];
-            foreach (var row in rows)
+            if (Main.Instance.DebugMode)
             {
-                List<string> currRow = [];
-                foreach (var word in row.Split())
+                // Extracted each string from each "row" which would be a string separated with the \n character
+                List<string> rows = [.. msg.Split('\n')];
+
+                // Interate through the rows and fix up the strings
+                List<string> modifiedRows = [];
+                foreach (var row in rows)
                 {
-                    var yes = word.Insert(0, "^3");
-                    currRow.Add(yes);
+                    List<string> currRow = [];
+                    foreach (var word in row.Split())
+                    {
+                        var yes = word.Insert(0, "^3");
+                        currRow.Add(yes);
+                    }
+
+                    modifiedRows.Add(string.Join(" ", currRow));
                 }
 
-                modifiedRows.Add(string.Join(" ", currRow));
+                // Make a new line
+                Debug.WriteLine();
+
+                // Now let's print the rows
+                foreach (var row in modifiedRows)
+                    Debug.WriteLine($"[Warnings] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
+
+                // Make a new line
+                Debug.WriteLine();
             }
-
-            // Make a new line
-            Debug.WriteLine();
-
-            // Now let's print the rows
-            foreach (var row in modifiedRows)
-                Debug.WriteLine($"[Warnings] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
-
-            // Make a new line
-            Debug.WriteLine();
 
             if (notify)
             {
@@ -199,36 +205,39 @@ namespace RecM
         /// Error logs.
         /// </summary>
         /// <param name="msg"></param>
-        internal static void Error(this string msg, bool notify = false, bool logServerSide = false)
+        internal static void Error(this string msg, bool notify = false)
         {
             if (string.IsNullOrEmpty(msg)) return;
 
-            // Extracted each string from each "row" which would be a string separated with the \n character
-            List<string> rows = [.. msg.Split('\n')];
-
-            // Interate through the rows and fix up the strings
-            List<string> modifiedRows = [];
-            foreach (var row in rows)
+            if (Main.Instance.DebugMode)
             {
-                List<string> currRow = [];
-                foreach (var word in row.Split())
+                // Extracted each string from each "row" which would be a string separated with the \n character
+                List<string> rows = [.. msg.Split('\n')];
+
+                // Interate through the rows and fix up the strings
+                List<string> modifiedRows = [];
+                foreach (var row in rows)
                 {
-                    var yes = word.Insert(0, "^1");
-                    currRow.Add(yes);
+                    List<string> currRow = [];
+                    foreach (var word in row.Split())
+                    {
+                        var yes = word.Insert(0, "^1");
+                        currRow.Add(yes);
+                    }
+
+                    modifiedRows.Add(string.Join(" ", currRow));
                 }
 
-                modifiedRows.Add(string.Join(" ", currRow));
+                // Make a new line
+                Debug.WriteLine();
+
+                // Now let's print the rows
+                foreach (var row in modifiedRows)
+                    Debug.WriteLine($"[Errors] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
+
+                // Make a new line
+                Debug.WriteLine();
             }
-
-            // Make a new line
-            Debug.WriteLine();
-
-            // Now let's print the rows
-            foreach (var row in modifiedRows)
-                Debug.WriteLine($"[Errors] [{new System.Diagnostics.StackFrame(1).GetMethod().Name}] " + row + "^7");
-
-            // Make a new line
-            Debug.WriteLine();
 
             if (notify)
             {
@@ -240,9 +249,6 @@ namespace RecM
                 API.SetNotificationMessage("recm_textures", "recm_notification", true, 4, "RecM", "Error");
                 API.DrawNotification(true, false);
             }
-
-            if (logServerSide)
-                EventDispatcher.Send("qdx_core:clientErrorLogger:Server", msg);
         }
 
         #endregion
@@ -327,7 +333,7 @@ namespace RecM
         /// General logs.
         /// </summary>
         /// <param name="msg"></param>
-        internal static void Log(this string msg, bool sendToDiscord = false, [CallerMemberName] string callerName = "")
+        internal static void Log(this string msg, [CallerMemberName] string callerName = "")
         {
             if (string.IsNullOrEmpty(msg)) return;
 
@@ -367,7 +373,7 @@ namespace RecM
         /// Warning logs.
         /// </summary>
         /// <param name="msg"></param>
-        internal static void Warning(this string msg, bool sendToDiscord = false, [CallerMemberName] string callerName = "")
+        internal static void Warning(this string msg, [CallerMemberName] string callerName = "")
         {
             if (string.IsNullOrEmpty(msg)) return;
 
@@ -407,14 +413,12 @@ namespace RecM
         /// Error logs.
         /// </summary>
         /// <param name="msg"></param>
-        internal static void Error(this string msg, bool sendToDiscord = false, [CallerMemberName] string callerName = "")
+        internal static void Error(this string msg, [CallerMemberName] string callerName = "")
         {
             if (string.IsNullOrEmpty(msg)) return;
 
             // Extracted each string from each "row" which would be a string separated with the \n character
-            List<string> rows = new List<string>();
-            foreach (var row in msg.Split('\n'))
-                rows.Add(row);
+            List<string> rows = [.. msg.Split('\n')];
 
             // Interate through the rows and fix up the strings
             List<string> modifiedRows = new List<string>();
