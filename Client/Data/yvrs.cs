@@ -8,8 +8,8 @@ namespace RecM.Client.data
     {
         public static List<string> backupVanillaYvrs =
         [
-            "agencyprep001",
-            "airdrop101",
+            //"agencyprep001", BROKEN
+            //"airdrop101", BROKEN
             "airending101",
             "airplanelandingredux101",
             "airplanelandingredux102",
