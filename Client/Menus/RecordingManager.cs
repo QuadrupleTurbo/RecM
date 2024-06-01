@@ -428,8 +428,6 @@ namespace RecM.Client.Menus
             var lucas7yoshiItem = new UIMenuItem("Lucas7yoshi", "For providing great help and research for the vehicle recordings from within the Codewalker Discord.");
             creditsMenu.AddItem(lucas7yoshiItem);
 
-            //API.SendNuiMessage(Json.Stringify(new { url = "https://clarityservers.tebex.io/category/stages" }));
-
             #endregion
         }
 
