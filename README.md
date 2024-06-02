@@ -10,7 +10,7 @@ A set of vehicle recording tools for FiveM.
 # Preview
 https://github.com/QuadrupleTurbo/RecM/assets/46331538/4b4acfb2-bd43-42ed-bb71-a69475113466
 
-- # Credits
+# Credits
 - Dexyfex
     - Author of Codewalker, it provided the tools for ovr -> yvr conversion.
     - [Codewalker](https://github.com/dexyfex/CodeWalker)
