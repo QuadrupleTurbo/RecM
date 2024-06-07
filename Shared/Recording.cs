@@ -243,7 +243,6 @@ namespace RecM
                 // Now, convert to proper yvr format
                 var yvr = XmlYvr.GetYvr(doc);
                 var yvrData = yvr.Save();
-                RpfFile.LoadResourceFile(yvr, yvrData, 1);
 
                 // Move it to the recordings resource
                 var recordingsPath = Path.Combine(API.GetResourcePath("RecM_records"), "stream");
@@ -359,7 +358,6 @@ namespace RecM
                     // Get the recording's start position
                     var yvr = RpfFile.GetResourceFile<YvrFile>(File.ReadAllBytes(file));
                     var yvrData = yvr.Save();
-                    RpfFile.LoadResourceFile(yvr, yvrData, 1);
                     var xml = YvrXml.GetXml(yvr);
 
                     // This will be used to load/save meta files

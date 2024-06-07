@@ -26,8 +26,6 @@ namespace RecM.Client
 
         public static Main Instance;
         public ExportDictionary ExportList;
-        private bool _firstTick;
-        private bool _isResourceValid;
         private readonly string _resourceName = API.GetCurrentResourceName();
         public bool DebugMode;
 
@@ -52,8 +50,6 @@ namespace RecM.Client
             else
                 "The resource name is invalid, please name it to RecM!".Error(true);
 
-            // Debug
-            Screen.Fading.FadeIn(0);
         }
 
         #endregion
