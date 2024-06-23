@@ -605,12 +605,20 @@ namespace RecM
             if (_recordingStartTime == 0)
                 _recordingStartTime = Game.GameTime;
 
+            // Get the entity matrix
             Vector3 forward = new();
             Vector3 right = new();
             Vector3 _ = new();
             Vector3 pos = new();
             API.GetEntityMatrix(veh.Handle, ref forward, ref right, ref _, ref pos);
 
+            // Get the steering angle
+            var steeringAngle = (float)(API.GetVehicleSteeringAngle(veh.Handle) * Math.PI / 180);
+
+            // Get the forward motion plus have the brake input combined so the reverse lights can work
+            var forwardMotion = API.GetEntitySpeedVector(veh.Handle, true).Y < -1f ? API.GetControlNormal(0, (int)Control.VehicleAccelerate) - API.GetControlNormal(0, (int)Control.VehicleBrake) : API.GetControlNormal(0, (int)Control.VehicleAccelerate);
+
+            // Finally add the recording to the list
             _currRecording.Add(new Record()
             {
                 Time = Game.GameTime - _recordingStartTime,
@@ -618,8 +626,8 @@ namespace RecM
                 Velocity = veh.Velocity,
                 Right = right,
                 Forward = forward,
-                SteeringAngle = (float)(API.GetVehicleSteeringAngle(veh.Handle) * Math.PI / 180),
-                Gas = API.GetControlNormal(0, (int)Control.VehicleAccelerate),
+                SteeringAngle = steeringAngle,
+                Gas = forwardMotion,
                 Brake = API.GetControlNormal(0, (int)Control.VehicleBrake),
                 UseHandbrake = API.GetVehicleHandbrake(veh.Handle)
             });
