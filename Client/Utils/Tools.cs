@@ -10,11 +10,11 @@ namespace RecM.Client.Utils
     {
         #region Spawn vehicle
 
-        public static async Task<Vehicle> SpawnVehicle(string model, bool networked = true)
+        public static async Task<Vehicle> SpawnVehicle(string model, bool networked = true, bool useMyPlayer = true)
         {
             // Store the data before the vehicle's deleted
             Entity entity = Game.PlayerPed.CurrentVehicle != null && Game.PlayerPed.CurrentVehicle.Exists() ? (Entity)Game.PlayerPed.CurrentVehicle : Game.PlayerPed;
-            Vector3 pos = entity.Position;
+            Vector3 pos = useMyPlayer ? entity.Position : new Vector3(entity.Position.X + 5, entity.Position.Y + 5, entity.Position.Z);
             float heading = entity.Heading;
 
             // Make sure that the model's loaded correctly
@@ -26,8 +26,11 @@ namespace RecM.Client.Utils
             }
 
             // Delete the last vehicle if it exists
-            Game.PlayerPed.CurrentVehicle?.Delete();
-            Game.PlayerPed.LastVehicle?.Delete();
+            if (useMyPlayer)
+            {
+                Game.PlayerPed.CurrentVehicle?.Delete();
+                Game.PlayerPed.LastVehicle?.Delete();
+            }
 
             Vehicle veh = null;
             if (networked)
@@ -70,7 +73,8 @@ namespace RecM.Client.Utils
             veh.IsEngineRunning = true;
 
             // Set the player into the vehicle
-            Game.Player.Character.SetIntoVehicle(veh, VehicleSeat.Driver);
+            if (useMyPlayer)
+                Game.Player.Character.SetIntoVehicle(veh, VehicleSeat.Driver);
 
             // So that the game eventually deletes it when player's away
             veh.Model.MarkAsNoLongerNeeded();

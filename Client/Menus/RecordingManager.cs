@@ -1,18 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using CitizenFX.Core;
+﻿using CitizenFX.Core;
 using CitizenFX.Core.Native;
 using FxEvents;
-using FxEvents.Shared.TypeExtensions;
 using RecM.Client.Utils;
 using ScaleformUI;
 using ScaleformUI.Menu;
 using ScaleformUI.Scaleforms;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace RecM.Client.Menus
 {
@@ -28,9 +25,8 @@ namespace RecM.Client.Menus
         private static UIMenuItem _createRecordingsMenuItem;
         private static List<string> _lastVanillaRecordings = null;
         private static Dictionary<string, Vector4> _lastCustomRecordings = null;
-        private static int _lastVanillaRecordingsMenuIndex;
-        private static int _lastCustomRecordingsMenuIndex;
-        public static InstructionalButton SwitchPlaybackSpeedDisplayBtn;
+        private static bool _discardConfirmPending;
+        private static InstructionalButton _showMenuBtn;
 
         #endregion
 
@@ -38,11 +34,18 @@ namespace RecM.Client.Menus
 
         public RecordingManager()
         {
+            EventHub.Send("RecM:syncRecordings:Server");
             Main.Instance.RegisterKeyMapping("recm_menu", "Vehicle Recording Utility.", "F7", new Action<int, List<object>, string>(async (source, args, rawCommand) =>
             {
-                bool success = await EventDispatcher.Get<bool>("RecM:openMenu:Server");
-                if (success && !MenuHandler.IsAnyMenuOpen)
+                if (MenuHandler.IsAnyMenuOpen) return;
+                bool success = await EventHub.Get<bool>("RecM:openMenu:Server");
+                if (success)
+                {
+                    if (MenuHandler.IsAnyMenuOpen) return; // Another check since we're waiting for the server to respond
                     menu.Visible = true;
+                }
+                else
+                    "You do not have permission to open the menu.".Alert(true);
             }));
 
             CreateMenu();
@@ -51,6 +54,29 @@ namespace RecM.Client.Menus
         #endregion
 
         #region Tools
+
+        #region Show/hide menu button helpers
+
+        private static void AddShowMenuButton(UIMenu targetMenu)
+        {
+            RemoveShowMenuButton();
+            _showMenuBtn = new InstructionalButton(Control.VehicleHorn, "Show Menu");
+            _showMenuBtn.OnControlSelected += (_) =>
+            {
+                RemoveShowMenuButton();
+                targetMenu.Visible = true;
+            };
+            ScaleformUI.Main.InstructionalButtons.AddInstructionalButton(_showMenuBtn);
+        }
+
+        private static void RemoveShowMenuButton()
+        {
+            if (_showMenuBtn == null) return;
+            ScaleformUI.Main.InstructionalButtons.RemoveInstructionalButton(_showMenuBtn);
+            _showMenuBtn = null;
+        }
+
+        #endregion
 
         #region Create menu
 
@@ -69,6 +95,14 @@ namespace RecM.Client.Menus
             menu.AddItem(_createRecordingsMenuItem);
             UIMenu createRecordingsMenu = new UIMenu("Create Recording", "Create Recording");
             createRecordingsMenu.ControlDisablingEnabled = false;
+            var hideMenuBtnCreate = new InstructionalButton(Control.VehicleHorn, Control.VehicleHorn, "Hide Menu");
+            createRecordingsMenu.InstructionalButtons.Add(hideMenuBtnCreate);
+            hideMenuBtnCreate.OnControlSelected += (_) =>
+            {
+                createRecordingsMenu.Visible = false;
+                AddShowMenuButton(createRecordingsMenu);
+            };
+            createRecordingsMenu.OnMenuOpen += (m, d) => RemoveShowMenuButton();
             _createRecordingsMenuItem.Activated += (sender, e) =>
             {
                 sender.SwitchTo(createRecordingsMenu, inheritOldMenuParams: true);
@@ -78,68 +112,49 @@ namespace RecM.Client.Menus
             createRecordingsMenu.AddItem(_startRecordingMenuItem);
             _startRecordingMenuItem.Activated += async (sender, e) =>
             {
-                // This is gonna be behind a locked item anyways
-                if (Recording.IsRecording)
-                {
-                    "There's a recording being made at the moment, please wait...".Alert(true);
-                    return;
-                }
-                if (!Game.PlayerPed.IsInVehicle())
-                {
-                    "You need to be in a vehicle to start recording.".Alert(true);
-                    return;
-                }
-                if (Game.PlayerPed.CurrentVehicle == null)
-                {
-                    "Your vehicle is null, you can't record with this.".Alert(true);
-                    return;
-                }
-                if (!Game.PlayerPed.CurrentVehicle.Exists())
-                {
-                    "Your vehicle doesn't exist, you can't record like this.".Alert(true);
-                    return;
-                }
-                if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed)
-                {
-                    "You aren't the driver, you need to be to record with this vehicle.".Alert(true);
-                    return;
-                }
-
+                bool success = Recording.StartRecording();
+                if (!success) return;
                 _startRecordingMenuItem.Enabled = false;
                 _startRecordingMenuItem.Description = "Recording...";
                 _stopRecordingMenuItem.Enabled = true;
-                Recording.StartRecording();
             };
 
             _stopRecordingMenuItem = new UIMenuItem("Stop Recording", "Stop recording the vehicle's data.") { Enabled = false };
             createRecordingsMenu.AddItem(_stopRecordingMenuItem);
             _stopRecordingMenuItem.Activated += async (sender, e) =>
             {
-                // This is gonna be behind a locked item anyways
-                if (!Recording.IsRecording)
-                {
-                    "There's nothing being recorded at the moment".Alert(true);
-                    return;
-                }
-
+                var success = Recording.StopRecording();
+                if (!success) return;
+                _discardConfirmPending = false;
                 _startRecordingMenuItem.Description = "Save or discard your recording.";
                 _stopRecordingMenuItem.Enabled = false;
                 _stopRecordingMenuItem.Description = "Save or discard your recording.";
                 _discardRecordingMenuItem.Enabled = true;
                 _saveRecordingMenuItem.Enabled = true;
-                Recording.StopRecording();
             };
 
             _discardRecordingMenuItem = new UIMenuItem("~r~Discard Recording", "Discard the recording you've just recorded.") { Enabled = false };
             createRecordingsMenu.AddItem(_discardRecordingMenuItem);
             _discardRecordingMenuItem.Activated += async (sender, e) =>
             {
+                if (!_discardConfirmPending)
+                {
+                    _discardConfirmPending = true;
+                    _discardRecordingMenuItem.Label = "~r~Confirm Discard?";
+                    _discardRecordingMenuItem.Description = "Press again to confirm discarding the recording.";
+                    sender.RefreshMenu(true);
+                    return;
+                }
+                _discardConfirmPending = false;
+                _discardRecordingMenuItem.Label = "~r~Discard Recording";
+                _discardRecordingMenuItem.Description = "Discard the recording you've just recorded.";
                 _startRecordingMenuItem.Enabled = true;
                 _startRecordingMenuItem.Description = "Start recording the vehicle's data.";
                 _stopRecordingMenuItem.Description = "Stop recording the vehicle's data.";
                 _discardRecordingMenuItem.Enabled = false;
                 _saveRecordingMenuItem.Enabled = false;
                 Recording.DiscardRecording();
+                sender.RefreshMenu(false);
             };
 
             _saveRecordingMenuItem = new UIMenuItem("~g~Save Recording", "Save the recording to your Saved Recordings menu.") { Enabled = false };
@@ -150,6 +165,7 @@ namespace RecM.Client.Menus
                 _discardRecordingMenuItem.Enabled = false;
 
                 var ui = await Tools.GetUserInput("Enter a name for your recording", 30);
+                if (string.IsNullOrEmpty(ui)) return;
                 if (!string.IsNullOrEmpty(ui))
                 {
                     // Join the words together since we can't have spaces in the name
@@ -162,7 +178,7 @@ namespace RecM.Client.Menus
                         _stopRecordingMenuItem.Description = "Stop recording the vehicle's data.";
                         _discardRecordingMenuItem.Enabled = false;
                         _saveRecordingMenuItem.Enabled = false;
-                        sender.RefreshMenu();
+                        sender.RefreshMenu(false);
                     }
                     else
                     {
@@ -193,7 +209,7 @@ namespace RecM.Client.Menus
             vanillaRecordingsMenu.ControlDisablingEnabled = false;
             vanillaRecordingsMenuItem.Activated += (sender, e) =>
             {
-                sender.SwitchTo(vanillaRecordingsMenu, inheritOldMenuParams: true, newMenuCurrentSelection: _lastVanillaRecordingsMenuIndex);
+                sender.SwitchTo(vanillaRecordingsMenu, inheritOldMenuParams: true);
             };
 
             UIMenuItem customRecordingsMenuItem = new UIMenuItem("Custom", "This menu contains all the custom recording data.");
@@ -203,7 +219,7 @@ namespace RecM.Client.Menus
             customRecordingsMenu.ControlDisablingEnabled = false;
             customRecordingsMenuItem.Activated += (sender, e) =>
             {
-                sender.SwitchTo(customRecordingsMenu, inheritOldMenuParams: true, newMenuCurrentSelection: _lastCustomRecordingsMenuIndex);
+                sender.SwitchTo(customRecordingsMenu, inheritOldMenuParams: true);
             };
 
             menu.OnMenuOpen += async (menu, data) =>
@@ -212,7 +228,8 @@ namespace RecM.Client.Menus
                 savedRecordingsMenuItem.Description = "Loading...";
 
                 // Get the recordings
-                (List<string> vanilla, Dictionary<string, Vector4> custom) = await Recording.GetRecordings();
+                List<string> vanilla = Recording.GetVanillaRecordings();
+                Dictionary<string, Vector4> custom = await Recording.GetCustomRecordings();
 
                 savedRecordingsMenuItem.Enabled = true;
                 savedRecordingsMenuItem.Description = "This menu contains all the saved recordings.";
@@ -221,7 +238,6 @@ namespace RecM.Client.Menus
 
                 if (_lastVanillaRecordings == null || !_lastVanillaRecordings.SequenceEqual(vanilla))
                 {
-                    _lastVanillaRecordingsMenuIndex = 0;
                     _lastVanillaRecordings = vanilla;
                     vanillaRecordingsMenu.Clear();
                     vanillaRecordingsMenu.InstructionalButtons.RemoveAll(x => !x.Text.Equals("Back") && !x.Text.Equals("Select"));
@@ -294,9 +310,6 @@ namespace RecM.Client.Menus
                             Recording.SwitchPlaybackSpeed(Recording.GetPlaybackSpeedIndex() - 1);
                         };
 
-                        SwitchPlaybackSpeedDisplayBtn = new InstructionalButton([], $"Speed {Recording.GetPlaybackSpeedName()}");
-                        vanillaRecordingsMenu.InstructionalButtons.Add(SwitchPlaybackSpeedDisplayBtn);
-
                         foreach (var recording in vanillaRecordings)
                         {
                             if (!vanillaRecordingsMenu.MenuItems.Any(x => x.Label.Equals(recording.Key)))
@@ -312,13 +325,7 @@ namespace RecM.Client.Menus
 
                                 listItem.OnListSelected += (item, index) =>
                                 {
-                                    if (Recording.IsLoadingRecording)
-                                    {
-                                        "There's a recording being loaded at the moment, please wait...".Alert(true);
-                                        return;
-                                    }
-
-                                    Recording.PlayRecording(int.Parse(item.Items[index].ToString()), item.Label);
+                                    Recording.StartRecordingPlayback(int.Parse(item.Items[index].ToString()), item.Label);
                                 };
                             }
                             else
@@ -348,7 +355,6 @@ namespace RecM.Client.Menus
 
                 if (_lastCustomRecordings == null || !_lastCustomRecordings.SequenceEqual(custom))
                 {
-                    _lastCustomRecordingsMenuIndex = 0;
                     _lastCustomRecordings = custom;
                     customRecordingsMenu.Clear();
                     if (custom.Count > 0)
@@ -370,41 +376,70 @@ namespace RecM.Client.Menus
                             customRecordingsMenu.AddItem(recordItem);
                             UIMenu recordItemMenu = new UIMenu(name, name);
                             recordItemMenu.ControlDisablingEnabled = false;
+
+                            var hideMenuBtnPlayback = new InstructionalButton(Control.VehicleHorn, Control.VehicleHorn, "Hide Menu");
+                            recordItemMenu.InstructionalButtons.Add(hideMenuBtnPlayback);
+                            hideMenuBtnPlayback.OnControlSelected += (_) =>
+                            {
+                                recordItemMenu.Visible = false;
+                                AddShowMenuButton(recordItemMenu);
+                            };
+                            recordItemMenu.OnMenuOpen += (m, d) => RemoveShowMenuButton();
+                            var stopPlaybackBtn = new InstructionalButton(Control.Jump, Control.Jump, "Stop Playback");
+                            recordItemMenu.InstructionalButtons.Add(stopPlaybackBtn);
+                            stopPlaybackBtn.OnControlSelected += (_) => Recording.StopRecordingPlayback();
+
                             recordItem.Activated += (sender, e) =>
                             {
                                 sender.SwitchTo(recordItemMenu, inheritOldMenuParams: true);
 
                                 // Update the playback speed display (best place to do it)
-                                ((UIMenuDynamicListItem)recordItemMenu.MenuItems.FirstOrDefault(x => x.Label.Equals("Playback Speed"))).CurrentListItem = Recording.GetPlaybackSpeedName();
+                                ((UIMenuDynamicListItem)recordItemMenu.MenuItems.FirstOrDefault(x => x.Label.Equals("Playback Speed"))).CurrentListItem = Recording.GetPlaybackSpeedName().Replace("Speed ", "");
                             };
 
-                            UIMenuItem playItem = new UIMenuItem("Play", "Play the recording.");
-                            recordItemMenu.AddItem(playItem);
-                            playItem.Activated += async (sender, e) =>
+                            UIMenuItem teleportItem = new UIMenuItem("Teleport", "Teleport to where this recording starts.");
+                            recordItemMenu.AddItem(teleportItem);
+                            teleportItem.Activated += async (sender, e) =>
                             {
-                                Recording.PlayRecording(id, $"{name}_{model}_", model, pos);
+                                await Tools.Teleport((Vector3)pos, pos.W, false);
                             };
 
-                            var playbackSpeedItem = new UIMenuDynamicListItem("Playback Speed", "Change the playback speed.", Recording.GetPlaybackSpeedName(), async (item, dir) =>
+                            UIMenuListItem playItem = new UIMenuListItem("Play", new List<dynamic> { "Normal", "Chase", "Chase Rubberband" }, 0, "Play the recording. Normal: ride inside the vehicle. Chase: follow in your own vehicle. Chase Rubberband: follow with speed matching.");
+                            recordItemMenu.AddItem(playItem);
+                            playItem.OnListSelected += async (sender, e) =>
+                            {
+                                bool chase = playItem.Index == 1;
+                                bool chaseRubberband = playItem.Index == 2;
+                                Recording.StartRecordingPlayback(id, $"{name}_{model}_", model: model, pos: pos, useMyPlayer: playItem.Index == 0, chaseMode: chase, chaseRubberband: chaseRubberband);
+                            };
+
+                            var playbackSpeedItem = new UIMenuDynamicListItem("Playback Speed", "Change the playback speed.", Recording.GetPlaybackSpeedName().Replace("Speed ", ""), async (item, dir) =>
                             {
                                 if (dir == ChangeDirection.Left)
                                 {
                                     if (Recording.GetPlaybackSpeedIndex() == 0)
-                                        return Recording.GetPlaybackSpeedName();
+                                        return Recording.GetPlaybackSpeedName().Replace("Speed ", "");
 
                                     Recording.SwitchPlaybackSpeed(Recording.GetPlaybackSpeedIndex() - 1);
                                 }
                                 else if (dir == ChangeDirection.Right)
                                 {
                                     if (Recording.GetPlaybackSpeedIndex() == Recording.GetPlaybackSpeedNameList().Count - 1)
-                                        return Recording.GetPlaybackSpeedName();
+                                        return Recording.GetPlaybackSpeedName().Replace("Speed ", "");
 
                                     Recording.SwitchPlaybackSpeed(Recording.GetPlaybackSpeedIndex() + 1);
                                 }
 
-                                return Recording.GetPlaybackSpeedName();
+                                return Recording.GetPlaybackSpeedName().Replace("Speed ", "");
                             });
                             recordItemMenu.AddItem(playbackSpeedItem);
+
+                            Recording.OnPlaybackStateChanged += (playing) =>
+                            {
+                                playItem.Enabled = !playing;
+                                teleportItem.Enabled = !playing;
+                                playbackSpeedItem.Enabled = !playing || !Recording.IsRubberbanding;
+                            };
 
                             UIMenuItem stopItem = new UIMenuItem("Stop", "Stop the recording.");
                             recordItemMenu.AddItem(stopItem);
@@ -413,10 +448,22 @@ namespace RecM.Client.Menus
                                 Recording.StopRecordingPlayback();
                             };
 
+                            bool deleteConfirmPending = false;
                             UIMenuItem deleteItem = new UIMenuItem("~r~Delete", "Delete the recording.");
                             recordItemMenu.AddItem(deleteItem);
                             deleteItem.Activated += async (sender, e) =>
                             {
+                                if (!deleteConfirmPending)
+                                {
+                                    deleteConfirmPending = true;
+                                    deleteItem.Label = "~r~Confirm Delete?";
+                                    deleteItem.Description = "Press again to confirm deleting the recording.";
+                                    sender.RefreshMenu(true);
+                                    return;
+                                }
+                                deleteConfirmPending = false;
+                                deleteItem.Label = "~r~Delete";
+                                deleteItem.Description = "Delete the recording.";
                                 var success = await Recording.DeleteRecording(name, model);
                                 if (success)
                                 {
@@ -424,6 +471,15 @@ namespace RecM.Client.Menus
                                     customRecordingsMenu.GoBack();
                                     savedRecordingsMenu.GoBack();
                                 }
+                                else
+                                    sender.RefreshMenu(true);
+                            };
+                            recordItemMenu.OnMenuClose += (m) =>
+                            {
+                                if (!deleteConfirmPending) return;
+                                deleteConfirmPending = false;
+                                deleteItem.Label = "~r~Delete";
+                                deleteItem.Description = "Delete the recording.";
                             };
                         }
                     }
@@ -438,15 +494,30 @@ namespace RecM.Client.Menus
                 #endregion
             };
 
-            vanillaRecordingsMenu.OnIndexChange += (menu, index) =>
+            #endregion
+
+            #region Editor
+
+            // TODO: Scene Creator — revisit later
+            /*
+            var editorItem = new UIMenuItem("Scene Creator", "Create scenes with your recorded vehicle paths.");
+            editorItem.SetRightLabel("→→→");
+            menu.AddItem(editorItem);
+            UIMenu editorMenu = new UIMenu("Scene Creator", "Scene Creator");
+            editorMenu.ControlDisablingEnabled = false;
+            editorItem.Activated += (sender, e) =>
             {
-                _lastVanillaRecordingsMenuIndex = index;
+                sender.SwitchTo(editorMenu, inheritOldMenuParams: true);
             };
 
-            customRecordingsMenu.OnIndexChange += (menu, index) =>
+            var createSceneItem = new UIMenuItem("Create Scene", "Create a scene with your recorded vehicle paths.");
+            editorMenu.AddItem(createSceneItem);
+            createSceneItem.Activated += async (sender, e) =>
             {
-                _lastCustomRecordingsMenuIndex = index;
+                MenuHandler.CloseAndClearHistory();
+                Freecam.SetFreeCamActive(true);
             };
+            */
 
             #endregion
 

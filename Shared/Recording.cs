@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using System.Drawing;
-using FxEvents.Shared.TypeExtensions;
 
 #if CLIENT
 
@@ -38,20 +37,25 @@ namespace RecM
 
 #if CLIENT
 
+        //mm / <summary>
+        /// The current vehicle of the player whilst recording.
+        /// </summary>
+        private static Vehicle _currentRecordingVehicle;
+
+        /// <summary>
+        /// The current vehicle model of the player whilst recording.
+        /// </summary>
+        private static string _currRecordingVehicleModel;
+
         /// <summary>
         /// To indicate if the recording is loaded or not.
         /// </summary>
-        public static bool IsLoadingRecording;
+        private static bool IsLoadingRecording;
 
         /// <summary>
         /// Whether the player's recording a playback.
         /// </summary>
-        public static bool IsRecording;
-
-        /// <summary>
-        /// The default vehicle to use if the current vehicle or model doesn't exist.
-        /// </summary>
-        private static readonly string _defaultVehicle = "dubsta2";
+        private static bool IsRecording;
 
         /// <summary>
         /// The current recording data.
@@ -62,6 +66,36 @@ namespace RecM
         /// The start time of the recording.
         /// </summary>
         private static int _recordingStartTime;
+
+        /// <summary>
+        /// The elapsed time of the recording.
+        /// </summary>
+        private string _elapsedTimeRecording;
+
+        /// <summary>
+        /// The current vehicle of the current playback.
+        /// </summary>
+        private static Vehicle _currentPlaybackVehicle;
+
+        /// <summary>
+        /// Whether the player's recording a playback.
+        /// </summary>
+        public static bool IsPlaybackGoingOn;
+
+        /// <summary>
+        /// Invoked when playback starts (true) or stops (false).
+        /// </summary>
+        public static Action<bool> OnPlaybackStateChanged;
+
+        /// <summary>
+        /// Whether the current playback is in rubberband chase mode.
+        /// </summary>
+        public static bool IsRubberbanding => _chaseRubberband;
+
+        /// <summary>
+        /// The default vehicle to use if the current vehicle or model doesn't exist.
+        /// </summary>
+        private static readonly string _defaultVehicle = "dubsta2";
 
         /// <summary>
         /// The last recording played, key being the id, and value being the name.
@@ -76,15 +110,15 @@ namespace RecM
         /// <summary>
         /// The current recording duration.
         /// </summary>
-        private static float _currRecordingDuration;
+        private static float _currRecordingPlaybackDuration;
 
         /// <summary>
         /// The current positions saved throughout the current recording.
         /// </summary>
-        private static List<Vector3> _currRecordingPositions = [];
+        private static List<Vector3> _currRecordingPlaybackPositions = [];
 
         /// <summary>
-        /// The last vehicle of the player.
+        /// The last vehicle of the player before the playback began.
         /// </summary>
         private static string _lastVehicleModel;
 
@@ -106,12 +140,45 @@ namespace RecM
         /// <summary>
         /// The playback speeds.
         /// </summary>
-        private static List<float> _playbackSpeeds = [ -16, -8, -4, -2, -1.75f, -1.5f, -1.25f, -1, -0.75f, -0.5f, -0.25f, 0, 0.25f, 0.50f, 0.75f, 1, 1.25f, 1.50f, 1.75f, 2, 4, 8, 16 ];
+        private static List<float> _playbackSpeeds = [-16, -8, -4, -2, -1.75f, -1.5f, -1.25f, -1, -0.75f, -0.5f, -0.25f, -0.05f, 0, 0.05f, 0.25f, 0.50f, 0.75f, 1, 1.25f, 1.50f, 1.75f, 2, 4, 8, 16];
 
         /// <summary>
         /// The current playback speed index.
         /// </summary>
         private static int _currPlaybackSpeedIndex = _playbackSpeeds.IndexOf(1);
+
+        /// <summary>
+        /// Whether the playback is rubberbanding or not.
+        /// </summary>
+        private static bool _isPlaybackRubberbanding;
+
+        /// <summary>
+        /// Whether the current playback is in chase mode (player follows in their own vehicle).
+        /// </summary>
+        private static bool _chaseMode;
+
+        /// <summary>
+        /// Whether the current chase playback uses rubberband speed matching.
+        /// </summary>
+        private static bool _chaseRubberband;
+
+#if CLIENT
+        /// <summary>
+        /// Persistent PID controller instance for rubberband chase speed matching.
+        /// </summary>
+        private static readonly PIDController _chasePid = new PIDController(0.02f, 0.0f, 0.01f);
+#endif
+
+        /// <summary>
+        /// The TaskCompletionSource for the save recording response.
+        /// </summary>
+        private static TaskCompletionSource<bool> _saveRecordingTcs;
+
+#endif
+
+#if SERVER
+
+        public static List<Tuple<string, string>> _resourceCacheToSyncList = [];
 
 #endif
 
@@ -124,7 +191,24 @@ namespace RecM
         public Recording()
         {
             Main.Instance.AddEventHandler("RecM:registerRecording:Client", new Action<string, string>(RegisterRecording));
+            Main.Instance.AddEventHandler("RecM:saveRecording:Client", new Action<bool, string>(OnSaveRecordingResponse), oldMethod: true);
             Main.Instance.AttachTick(GeneralThread);
+
+            // Add exports
+            Main.Instance.ExportList.Add("startRecording", StartRecording);
+            Main.Instance.ExportList.Add("stopRecording", StopRecording);
+            Main.Instance.ExportList.Add("discardRecording", DiscardRecording);
+            Main.Instance.ExportList.Add("saveRecording", SaveRecording);
+            Main.Instance.ExportList.Add("deleteRecording", DeleteRecording);
+            Main.Instance.ExportList.Add("getVanillaRecordings", GetVanillaRecordings);
+            Main.Instance.ExportList.Add("getCustomRecordings", GetCustomRecordings);
+            Main.Instance.ExportList.Add("startRecordingPlayback", StartRecordingPlayback);
+            Main.Instance.ExportList.Add("stopRecordingPlayback", StopRecordingPlayback);
+            Main.Instance.ExportList.Add("getPlaybackSpeedValueList", GetPlaybackSpeedValueList);
+            Main.Instance.ExportList.Add("getPlaybackSpeedNameList", GetPlaybackSpeedNameList);
+            Main.Instance.ExportList.Add("getPlaybackSpeedIndex", GetPlaybackSpeedIndex);
+            Main.Instance.ExportList.Add("getPlaybackSpeedValue", GetPlaybackSpeedValue);
+            Main.Instance.ExportList.Add("switchPlaybackSpeed", SwitchPlaybackSpeed);
 
             // Only at startup
             LoadTextures();
@@ -136,10 +220,11 @@ namespace RecM
 
         public Recording()
         {
-            Main.Instance.AddEventHandler("RecM:saveRecording:Server", new Action<string, string, string, bool, NetworkCallbackDelegate>(SaveRecording), true);
-            Main.Instance.AddEventHandler("RecM:deleteRecording:Server", new Func<Player, string, string, Task<Tuple<bool, string>>>(DeleteRecording));
+            Main.Instance.AddEventHandler("RecM:saveRecording:Server", new Action<Player, string, string, string, bool>(SaveRecording), oldMethod: true);
+            Main.Instance.AddEventHandler("RecM:deleteRecording:Server", new Func<Player, string, string, Task<ValueTuple<bool, string>>>(DeleteRecording));
             Main.Instance.AddEventHandler("RecM:getRecordings:Server", new Func<Player, Task<Dictionary<string, Vector4>>>(GetRecordings));
             Main.Instance.AddEventHandler("RecM:openMenu:Server", new Func<Player, Task<bool>>(OpenMenu));
+            Main.Instance.AddEventHandler("RecM:syncRecordings:Server", new Action<Player>(SyncRecordings));
 
             // Only at startup
             CleanRecordings();
@@ -159,13 +244,30 @@ namespace RecM
 
         #endregion
 
+        #region Save recording response
+
+        private static void OnSaveRecordingResponse(bool success, string msg)
+        {
+            if (!success)
+            {
+                msg.Error(true);
+                _saveRecordingTcs?.SetResult(false);
+                return;
+            }
+            "Recording saved!".Log(true);
+            DiscardRecording();
+            _saveRecordingTcs?.SetResult(true);
+        }
+
+        #endregion
+
 #endif
 
 #if SERVER
 
         #region Save recording
 
-        private void SaveRecording(string name, string model, string data, bool overwrite, NetworkCallbackDelegate cb)
+        private void SaveRecording([FromSource] Player source, string name, string model, string data, bool overwrite)
         {
             try
             {
@@ -173,7 +275,7 @@ namespace RecM
                 if (!Directory.Exists(API.GetResourcePath("RecM_records")))
                 {
                     "You need to have the RecM_records resource installed.".Error();
-                    cb(false, "You need to have the RecM_records resource installed.");
+                    source.TriggerEvent("RecM:saveRecording:Client", false, "You need to have the RecM_records resource installed.");
                     return;
                 }
 
@@ -261,7 +363,8 @@ namespace RecM
                 {
                     File.WriteAllBytes(Path.Combine(recordingsPath, $"{name}_{model}_001.yvr"), yvrData);
                     var cacheString = API.RegisterResourceAsset("RecM_records", $"stream/{name}_{model}_001.yvr");
-                    EventDispatcher.Send(Main.Instance.Clients, "RecM:registerRecording:Client", $"{name}_{model}_001.yvr", cacheString);
+                    EventHub.Send(Main.Instance.Clients, "RecM:registerRecording:Client", $"{name}_{model}_001.yvr", cacheString);
+                    _resourceCacheToSyncList.Add(new Tuple<string, string>($"{name}_{model}_001.yvr", cacheString));
                 }
                 else
                 {
@@ -275,22 +378,23 @@ namespace RecM
                             .Max();
                         File.WriteAllBytes(Path.Combine(recordingsPath, $"{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr"), yvrData);
                         var cacheString = API.RegisterResourceAsset("RecM_records", $"stream/{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr");
-                        EventDispatcher.Send(Main.Instance.Clients, "RecM:registerRecording:Client", $"{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr", cacheString);
+                        EventHub.Send(Main.Instance.Clients, "RecM:registerRecording:Client", $"{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr", cacheString);
+                        _resourceCacheToSyncList.Add(new Tuple<string, string>($"{name}_{model}_{(maxValue + 1).ToString().PadLeft(3, '0')}.yvr", cacheString));
                     }
                     else
                     {
-                        cb(false, "A recording with this name and model already exists.");
+                        source.TriggerEvent("RecM:saveRecording:Client", false, "A recording with this name and model already exists.");
                         return;
                     }
                 }
 
                 // Callback telling the client that the recording was saved
-                cb(true, "Success!");
+                source.TriggerEvent("RecM:saveRecording:Client", true, "Success!");
             }
             catch (Exception ex)
             {
                 ex.ToString().Error();
-                cb(false, "There was an error with saving the recording, please check the server console for an exception.");
+                source.TriggerEvent("RecM:saveRecording:Client", false, "There was an error with saving the recording, please check the server console for an exception.");
             }
         }
 
@@ -298,7 +402,7 @@ namespace RecM
 
         #region Delete recording
 
-        private async Task<Tuple<bool, string>> DeleteRecording([FromSource] Player source, string name, string model)
+        private async Task<ValueTuple<bool, string>> DeleteRecording([FromSource] Player source, string name, string model)
         {
             try
             {
@@ -306,7 +410,7 @@ namespace RecM
                 if (!Directory.Exists(API.GetResourcePath("RecM_records")))
                 {
                     "You need to have the RecM_records resource installed.".Error();
-                    return new Tuple<bool, string>(false, "You need to have the RecM_records resource installed.");
+                    return new ValueTuple<bool, string>(false, "You need to have the RecM_records resource installed.");
                 }
 
                 // The path to the recordings
@@ -321,12 +425,12 @@ namespace RecM
                 }
 
                 // Finally, callback telling the client that the recording was saved
-                return new Tuple<bool, string>(true, "Success!");
+                return new ValueTuple<bool, string>(true, "Success!");
             }
             catch (Exception ex)
             {
                 ex.ToString().Error();
-                return new Tuple<bool, string>(false, "There was an error with deleting the recording, please check the server console for an exception.");
+                return new ValueTuple<bool, string>(false, "There was an error with deleting the recording, please check the server console for an exception.");
             }
         }
 
@@ -419,6 +523,16 @@ namespace RecM
 
         #endregion
 
+        #region Sync recordings
+
+        private async void SyncRecordings([FromSource] Player source)
+        {
+            foreach (var item in _resourceCacheToSyncList)
+                EventHub.Send(source, "RecM:registerRecording:Client", item.Item1, item.Item2);
+        }
+
+        #endregion
+
 #endif
 
         #endregion
@@ -431,6 +545,15 @@ namespace RecM
 
         private async Task GeneralThread()
         {
+            // Display the recording time if the player's recording
+            if (IsRecording)
+            {
+                _elapsedTimeRecording = TimeSpan.FromMilliseconds(Game.GameTime - _recordingStartTime).ToString(@"mm\:ss");
+                Screen.ShowSubtitle($"~r~• ~w~{_elapsedTimeRecording}", 0);
+            }
+            else if (_currRecording.Count > 0)
+                Screen.ShowSubtitle($"~g~{_elapsedTimeRecording}", 0);
+
             if (ScaleformUI.MenuHandler.IsAnyMenuOpen)
             {
                 // I don't want the menu to disable all controls, but I want these ones disabled
@@ -454,51 +577,9 @@ namespace RecM
 
         #endregion
 
-        #region Recording checker thread
-
-        private static async Task RecordingCheckerThread()
-        {
-            if (!Game.PlayerPed.IsInVehicle()) return;
-            if (Game.PlayerPed.CurrentVehicle == null) return;
-            if (!Game.PlayerPed.CurrentVehicle.Exists()) return;
-            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return;
-            var veh = Game.PlayerPed.CurrentVehicle;
-
-            // Play the recording until it's done
-            if (API.IsPlaybackGoingOnForVehicle(veh.Handle))
-            {
-                var playbackSpeed = GetPlaybackSpeedValue();
-                var curr = TimeSpan.FromMilliseconds((_currRecordingPlaybackStartTime - Game.GameTime) * playbackSpeed).ToString(@"mm\:ss");
-                var dur = TimeSpan.FromMilliseconds(_currRecordingDuration).ToString(@"mm\:ss");
-                Screen.ShowSubtitle(playbackSpeed == 0 ? "Paused" : $"{(playbackSpeed < 0 && (_currRecordingPlaybackStartTime - Game.GameTime) <= 0 ? "00:00" : curr)} / {dur}", 0);
-                for (int i = 0; i < _currRecordingPositions.Count; i++)
-                {
-                    Vector3 recPos = _currRecordingPositions[i];
-                    if (i < _currRecordingPositions.Count - 1)
-                        World.DrawLine(recPos, _currRecordingPositions[i + 1], Color.FromArgb(255, 0, 0));
-                }
-
-                // Stop the player from trying to take control of the steering wheel (thanks Lucas7yoshi!)
-                API.SetPlayerControl(Game.Player.Handle, false, 260);
-
-                // Disable vehicle exit
-                Game.DisableControlThisFrame(0, Control.VehicleExit);
-                if (Game.IsDisabledControlJustReleased(0, Control.VehicleExit))
-                    "~r~You can't exit your vehicle whilst recording!".Help(5000);
-            }
-            else
-            {
-                // No playback is active and since last recording played is not null, we can assume that the recording is done
-                if (_lastRecordingPlayed != null)
-                    StopRecordingPlayback();
-            }
-        }
-
-        #endregion
-
         #region Recording playback thread
 
-        private static async Task RecordingPlaybackThread()
+        private static async Task RecordingThread()
         {
             RecordThisFrame();
             await BaseScript.Delay(100);
@@ -508,12 +589,72 @@ namespace RecM
 
         #region Recording playback checker thread
 
-        private static async Task RecordingPlaybackCheckerThread()
+        private static async Task RecordingCheckerThread()
         {
+            // Prevent falling off bike and keep vehicle/ped invincible
+            API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 1);
+            if (_currentRecordingVehicle != null && _currentRecordingVehicle.Exists())
+                _currentRecordingVehicle.IsInvincible = true;
+
             // Disable vehicle exit
             Game.DisableControlThisFrame(0, Control.VehicleExit);
             if (Game.IsDisabledControlJustReleased(0, Control.VehicleExit))
                 "~r~You can't exit your vehicle whilst recording!".Help(5000);
+        }
+
+        private static async Task RecordingPlaybackCheckerThread()
+        {
+            if (_currentPlaybackVehicle == null) return;
+            if (!_currentPlaybackVehicle.Exists()) return;
+            var veh = _currentPlaybackVehicle;
+
+            // Play the recording until it's done
+            if (API.IsPlaybackGoingOnForVehicle(veh.Handle))
+            {
+                var playbackSpeed = GetPlaybackSpeedValue();
+                var currMs = API.GetTimePositionInRecording(veh.Handle);
+                var curr = TimeSpan.FromMilliseconds(currMs).ToString(@"mm\:ss");
+                var dur = TimeSpan.FromMilliseconds(_currRecordingPlaybackDuration).ToString(@"mm\:ss");
+                var modeLabel = _chaseRubberband ? "Chase Rubberband" : _chaseMode ? "Chase" : "Normal";
+                Screen.ShowSubtitle($"{(playbackSpeed == 0 ? "~r~Paused" : $"~g~{playbackSpeed}x")}  ~s~|  {(playbackSpeed < 0 && currMs <= 0 ? "00:00" : curr)} / {dur}  ~s~| {modeLabel}", 0);
+                for (int i = 0; i < _currRecordingPlaybackPositions.Count; i++)
+                {
+                    Vector3 recPos = _currRecordingPlaybackPositions[i];
+                    if (i < _currRecordingPlaybackPositions.Count - 1)
+                        World.DrawLine(recPos, _currRecordingPlaybackPositions[i + 1], Color.FromArgb(255, 0, 0));
+                }
+
+                if (Game.PlayerPed.IsInVehicle())
+                {
+                    if (Game.PlayerPed.CurrentVehicle != null && Game.PlayerPed.CurrentVehicle.Exists())
+                    {
+                        if (Game.PlayerPed.CurrentVehicle == veh)
+                        {
+                            // Prevent falling off bike and keep vehicle/ped invincible
+                            API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 1);
+                            veh.IsInvincible = true;
+                            API.SetPlayerControl(Game.Player.Handle, false, 260);
+
+                            // Disable vehicle exit
+                            Game.DisableControlThisFrame(0, Control.VehicleExit);
+                            if (Game.IsDisabledControlJustReleased(0, Control.VehicleExit))
+                                "~r~You can't exit your vehicle whilst recording!".Help(5000);
+                        }
+                        else if (_chaseMode)
+                        {
+                            // Ensure that the playback speed is synced with the following vehicle
+                            if (_chaseRubberband)
+                                ControlPlaybackVehicleSpeed(veh);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // No playback is active and since last recording played is not null, we can assume that the recording is done
+                if (_lastRecordingPlayed != null)
+                    StopRecordingPlayback();
+            }
         }
 
         #endregion
@@ -528,22 +669,72 @@ namespace RecM
 
         #region Start recording
 
-        public static void StartRecording()
+        public static bool StartRecording()
         {
-            IsRecording = true; 
-            Main.Instance.AttachTick(RecordingPlaybackThread);
-            Main.Instance.AttachTick(RecordingPlaybackCheckerThread);
+            if (IsRecording)
+            {
+                "There's a recording being made at the moment, please wait...".Alert(true);
+                return false;
+            }
+            if (!Game.PlayerPed.IsInVehicle())
+            {
+                "You need to be in a vehicle to start recording.".Alert(true);
+                return false;
+            }
+            if (Game.PlayerPed.CurrentVehicle == null)
+            {
+                "Your vehicle is null, you can't record with this.".Alert(true);
+                return false;
+            }
+            if (!Game.PlayerPed.CurrentVehicle.Exists())
+            {
+                "Your vehicle doesn't exist, you can't record like this.".Alert(true);
+                return false;
+            }
+            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed)
+            {
+                "You aren't the driver, you need to be to record with this vehicle.".Alert(true);
+                return false;
+            }
+            var veh = Game.PlayerPed.CurrentVehicle;
+            veh.IsInvincible = true;
+            Game.PlayerPed.IsInvincible = true;
+            veh.Repair();
+            veh.Wash();
+            veh.DirtLevel = 0;
+            _currentRecordingVehicle = veh;
+            _currRecordingVehicleModel = veh.DisplayName;
+            IsRecording = true;
+            API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 1);
+            Main.Instance.AttachTick(RecordingThread);
+            Main.Instance.AttachTick(RecordingCheckerThread);
+            return true;
         }
 
         #endregion
 
         #region Stop recording
 
-        public static void StopRecording()
+        public static bool StopRecording()
         {
+            if (!IsRecording)
+            {
+                "You need to start recording first!".Error(true);
+                return false;
+            }
+            if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null && Game.PlayerPed.CurrentVehicle.Exists() && Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) == Game.PlayerPed)
+            {
+                Game.PlayerPed.CurrentVehicle.IsInvincible = false;
+                Game.PlayerPed.CurrentVehicle.Repair();
+                Game.PlayerPed.CurrentVehicle.Wash();
+                Game.PlayerPed.CurrentVehicle.DirtLevel = 0;
+            }
+            Game.PlayerPed.IsInvincible = false;
             IsRecording = false;
-            Main.Instance.DetachTick(RecordingPlaybackThread);
-            Main.Instance.DetachTick(RecordingPlaybackCheckerThread);
+            Main.Instance.DetachTick(RecordingThread);
+            Main.Instance.DetachTick(RecordingCheckerThread);
+            API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 0);
+            return true;
         }
 
         #endregion
@@ -553,8 +744,12 @@ namespace RecM
         public static void DiscardRecording()
         {
             IsRecording = false;
+            API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 0);
+            Game.PlayerPed.IsInvincible = false;
             _currRecording.Clear();
             _recordingStartTime = 0;
+            _currentRecordingVehicle = null;
+            _currRecordingVehicleModel = null;
         }
 
         #endregion
@@ -568,50 +763,51 @@ namespace RecM
                 "You need to record something first!".Error(true);
                 return false;
             }
-            if (!Game.PlayerPed.IsInVehicle()) return false;
-            if (Game.PlayerPed.CurrentVehicle == null) return false;
-            if (!Game.PlayerPed.CurrentVehicle.Exists()) return false;
-            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return false;
-            var veh = Game.PlayerPed.CurrentVehicle;
 
-            // Create a TaskCompletionSource to await the event completion
-            var tcs = new TaskCompletionSource<bool>();
+            _saveRecordingTcs = new TaskCompletionSource<bool>();
 
             // Latent event that sends little increments of data to the server
-            BaseScript.TriggerLatentServerEvent("RecM:saveRecording:Server", 200000, name, veh.DisplayName, Json.Stringify(_currRecording), overwrite, new Action<bool, string>((success, msg) =>
+            BaseScript.TriggerLatentServerEvent("RecM:saveRecording:Server", 200000, name, _currRecordingVehicleModel, Json.Stringify(_currRecording), overwrite);
+
+            return await _saveRecordingTcs.Task;
+        }
+
+        #endregion
+
+        #region Delete recording
+
+        public static async Task<bool> DeleteRecording(string name, string model)
+        {
+            if (IsPlaybackGoingOn)
             {
-                if (!success)
-                {
-                    msg.Error(true);
-                    tcs.SetResult(false);
-                    return;
-                }
+                "There's a playback going on at the moment, please wait...".Alert(true);
+                return false;
+            }
 
-                // Notify the client of the recording being saved
-                "Recording saved!".Log(true);
+            // Latent event that sends little increments of data to the server
+            (bool success, string msg) = await EventHub.Get<ValueTuple<bool, string>>("RecM:deleteRecording:Server", name, model);
+            if (!success)
+            {
+                msg.Error(true);
+                return false;
+            }
 
-                // Reset the recording data
-                IsRecording = false;
-                _currRecording.Clear();
-                _recordingStartTime = 0;
+            // Notify the client of the recording being deleted
+            $"Recording {name} successfully deleted!".Log(true);
 
-                tcs.SetResult(true);
-            }));
-
-            return await tcs.Task;
+            return true;
         }
 
         #endregion
 
         #region Record this frame
 
-        public static void RecordThisFrame()
+        private static void RecordThisFrame()
         {
             if (!Game.PlayerPed.IsInVehicle()) return;
-            if (Game.PlayerPed.CurrentVehicle == null) return;
-            if (!Game.PlayerPed.CurrentVehicle.Exists()) return;
-            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return;
-            var veh = Game.PlayerPed.CurrentVehicle;
+            if (_currentRecordingVehicle == null) return;
+            if (!_currentRecordingVehicle.Exists()) return;
+            if (_currentRecordingVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return;
 
             // We only need this once per recording, it's the first frame
             if (_recordingStartTime == 0)
@@ -622,69 +818,84 @@ namespace RecM
             Vector3 right = new();
             Vector3 _ = new();
             Vector3 pos = new();
-            API.GetEntityMatrix(veh.Handle, ref forward, ref right, ref _, ref pos);
+            API.GetEntityMatrix(_currentRecordingVehicle.Handle, ref forward, ref right, ref _, ref pos);
 
             // Get the steering angle
-            var steeringAngle = (float)(API.GetVehicleSteeringAngle(veh.Handle) * Math.PI / 180);
+            var steeringAngle = (float)(API.GetVehicleSteeringAngle(_currentRecordingVehicle.Handle) * Math.PI / 180);
 
             // Get the forward motion plus have the brake input combined so the reverse lights can work
-            var forwardMotion = API.GetEntitySpeedVector(veh.Handle, true).Y < -1f ? API.GetControlNormal(0, (int)Control.VehicleAccelerate) - API.GetControlNormal(0, (int)Control.VehicleBrake) : API.GetControlNormal(0, (int)Control.VehicleAccelerate);
+            var forwardMotion = API.GetEntitySpeedVector(_currentRecordingVehicle.Handle, true).Y < -1f ? API.GetControlNormal(0, (int)Control.VehicleAccelerate) - API.GetControlNormal(0, (int)Control.VehicleBrake) : API.GetControlNormal(0, (int)Control.VehicleAccelerate);
 
             // Finally add the recording to the list
             _currRecording.Add(new Record()
             {
                 Time = Game.GameTime - _recordingStartTime,
                 Position = pos,
-                Velocity = veh.Velocity,
+                Velocity = _currentRecordingVehicle.Velocity,
                 Right = right,
                 Forward = forward,
                 SteeringAngle = steeringAngle,
                 Gas = forwardMotion,
                 Brake = API.GetControlNormal(0, (int)Control.VehicleBrake),
-                UseHandbrake = API.GetVehicleHandbrake(veh.Handle)
+                UseHandbrake = API.GetVehicleHandbrake(_currentRecordingVehicle.Handle)
             });
         }
 
         #endregion
 
-        #region Get recordings
+        #region Get vanilla recordings
 
-        public static async Task<Tuple<List<string>, Dictionary<string, Vector4>>> GetRecordings()
+        public static List<string> GetVanillaRecordings()
         {
             // Declare the list that will hold the recordings
             List<string> vanilla = [];
 
             // Now let's load the vanilla recordings
             var json = API.LoadResourceFile("RecM_records", "vanilla.json");
-            if (string.IsNullOrEmpty(json))
-            {
-                vanilla = [];
-            }
-            else
-            {
+            if (!string.IsNullOrEmpty(json))
                 foreach (var item in Json.Parse<JArray>(json))
                     vanilla.Add(item.ToString());
-            }
 
-            // Get the list of custom recordings
-            var custom = await EventDispatcher.Get<Dictionary<string, Vector4>>("RecM:getRecordings:Server");
+            return vanilla;
+        }
 
-            return new Tuple<List<string>, Dictionary<string, Vector4>>(vanilla, custom);
+
+        #endregion
+
+        #region Get custom recordings
+
+        public static async Task<Dictionary<string, Vector4>> GetCustomRecordings()
+        {
+            // Latent event that sends little increments of data to the server
+            return await EventHub.Get<Dictionary<string, Vector4>>("RecM:getRecordings:Server");
         }
 
         #endregion
 
-        #region Play recording
+        #region Start recording playback
 
-        public async static void PlayRecording(int id, string name, string model = null, Vector4? pos = null)
+        public async static void StartRecordingPlayback(int id, string name, string model = null, Vector4? pos = null, Vehicle veh = null, bool useMyPlayer = true, bool chaseMode = false, bool chaseRubberband = false)
         {
             try
             {
+                if (IsLoadingRecording)
+                {
+                    "There's a recording being loaded at the moment, please wait...".Alert(true);
+                    return;
+                }
+
                 if (_recordingCooldown)
                 {
                     "Just a 1 second cooldown, please wait...".Warning(true);
                     return;
                 }
+
+                // Indicate that the playback has started
+                IsPlaybackGoingOn = true;
+
+                // Force useMyPlayer off when chasing (safe guard in case caller didn't do it)
+                if (chaseMode || chaseRubberband)
+                    useMyPlayer = false;
 
                 // Just an indicator that the recording is playing
                 IsLoadingRecording = true;
@@ -694,65 +905,84 @@ namespace RecM
                 // Whether the playback is switching to another playback
                 bool isSwitching = false;
 
-                Vehicle veh;
-                if (model != null)
+                // If null, the vehicle wasn't provided, so we need to spawn it
+                if (veh == null)
                 {
-                    // Get the current vehicle for a backup if it exists
-                    Vehicle backupVeh = null;
-                    if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null)
+                    if (model != null)
                     {
-                        backupVeh = Game.PlayerPed.CurrentVehicle;
-
-                        // Stop the playback if it's going on
-                        if (API.IsPlaybackGoingOnForVehicle(backupVeh.Handle))
-                            isSwitching = true;
-                        else
-                            _lastVehicleModel = backupVeh.DisplayName;
-                    }
-
-                    // Check if the model exists
-                    if (API.IsModelInCdimage(Game.GenerateHashASCII(model)))
-                    {
-                        if (backupVeh != null)
+                        // Get the current vehicle for a backup if it exists
+                        Vehicle backupVeh = null;
+                        if (useMyPlayer)
                         {
-                            // Basically checking if the player's already using the vehicle required for the recording, if so, just use that
-                            if (backupVeh.DisplayName == model)
-                                veh = backupVeh;
+                            if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null)
+                            {
+                                backupVeh = Game.PlayerPed.CurrentVehicle;
+
+                                // Stop the playback if it's going on
+                                if (API.IsPlaybackGoingOnForVehicle(backupVeh.Handle))
+                                    isSwitching = true;
+                                else
+                                    _lastVehicleModel = backupVeh.DisplayName;
+                            }
+                        }
+                        else
+                        {
+                            if (_currentPlaybackVehicle != null)
+                            {
+                                backupVeh = _currentPlaybackVehicle;
+
+                                // Stop the playback if it's going on
+                                if (API.IsPlaybackGoingOnForVehicle(backupVeh.Handle))
+                                    isSwitching = true;
+                                else
+                                    _lastVehicleModel = backupVeh.DisplayName;
+                            }
+                        }
+
+                        // Check if the model exists
+                        if (API.IsModelInCdimage(Game.GenerateHashASCII(model)))
+                        {
+                            if (backupVeh != null)
+                            {
+                                // Basically checking if the player's already using the vehicle required for the recording, if so, just use that
+                                if (backupVeh.DisplayName == model)
+                                    veh = backupVeh;
+                                else
+                                    veh = await Tools.SpawnVehicle(model, false, useMyPlayer);
+                            }
                             else
-                                veh = await Tools.SpawnVehicle(model, false);
+                                veh = await Tools.SpawnVehicle(model, false, useMyPlayer);
                         }
                         else
-                            veh = await Tools.SpawnVehicle(model, false);
+                        {
+                            // Since the model doesn't exist, we'll use the backup vehicle if it exists, otherwise we'll use the default vehicle
+                            if (backupVeh != null)
+                            {
+                                $"The model {model} for this recording doesn't exist, using your current vehicle instead...".Error(true);
+                                veh = backupVeh;
+                            }
+                            else
+                            {
+                                $"The model {model} for this recording doesn't exist, using the default vehicle instead...".Error(true);
+                                veh = await Tools.SpawnVehicle(_defaultVehicle, false, useMyPlayer);
+                            }
+                        }
                     }
                     else
                     {
-                        // Since the model doesn't exist, we'll use the backup vehicle if it exists, otherwise we'll use the default vehicle
-                        if (backupVeh != null)
+                        if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null && useMyPlayer)
                         {
-                            $"The model {model} for this recording doesn't exist, using your current vehicle instead...".Error(true);
-                            veh = backupVeh;
-                        }
-                        else
-                        {
-                            $"The model {model} for this recording doesn't exist, using the default vehicle instead...".Error(true);
-                            veh = await Tools.SpawnVehicle(_defaultVehicle, false);
-                        }
-                    }
-                }
-                else
-                {
-                    if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null)
-                    {
-                        veh = Game.PlayerPed.CurrentVehicle;
+                            veh = Game.PlayerPed.CurrentVehicle;
 
-                        // Stop the playback if it's going on
-                        if (API.IsPlaybackGoingOnForVehicle(veh.Handle))
-                            isSwitching = true;
+                            // Stop the playback if it's going on
+                            if (API.IsPlaybackGoingOnForVehicle(veh.Handle))
+                                isSwitching = true;
+                            else
+                                _lastVehicleModel = veh.DisplayName;
+                        }
                         else
-                            _lastVehicleModel = veh.DisplayName;
+                            veh = await Tools.SpawnVehicle(_defaultVehicle, false, useMyPlayer);
                     }
-                    else
-                        veh = await Tools.SpawnVehicle(_defaultVehicle, false);
                 }
 
                 // This actually should be rare but just in case
@@ -760,15 +990,53 @@ namespace RecM
                 {
                     "The vehicle failed to spawn for the recording.".Error(true);
                     IsLoadingRecording = false;
+                    IsPlaybackGoingOn = false;
                     return;
                 }
+
+                // Reset the vehicle
+                veh.Repair();
+                veh.Wash();
+                veh.DirtLevel = 0;
+                veh.IsInvincible = true;
+
+                // Set the current playback vehicle
+                _currentPlaybackVehicle = veh;
+
+                // Detect Normal→Chase before SwitchRecordingPlayback clears _chaseMode
+                bool switchingNormalToChase = isSwitching && !_chaseMode && (chaseMode || chaseRubberband);
 
                 // Switch the playback if there's already one going on
                 if (isSwitching)
                     SwitchRecordingPlayback();
 
-                // Attach the recording checker tick
-                Main.Instance.AttachTick(RecordingCheckerThread);
+                // Store chase mode (must be after SwitchRecordingPlayback to avoid being reset)
+                _chaseMode = chaseMode || chaseRubberband;
+                _chaseRubberband = chaseRubberband;
+                OnPlaybackStateChanged?.Invoke(true);
+#if CLIENT
+                Game.PlayerPed.IsInvincible = true;
+                API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 1);
+                if (_chaseRubberband)
+                    _chasePid.Reset();
+
+                // Normal→Chase: eject player from playback vehicle, teleport them behind the recording start, spawn their previous vehicle
+                if (switchingNormalToChase)
+                {
+                    API.SetPlayerControl(Game.Player.Handle, true, 0);
+                    Game.PlayerPed.Task.WarpOutOfVehicle(veh);
+                    await BaseScript.Delay(100);
+                    var startPos = pos != null ? (Vector3)pos : veh.Position;
+                    float headingRad = (pos?.W ?? 0f) * (float)Math.PI / 180f;
+                    var spawnPos = new Vector3(
+                        startPos.X + (float)Math.Sin(headingRad) * 20f,
+                        startPos.Y - (float)Math.Cos(headingRad) * 20f,
+                        startPos.Z);
+                    await Tools.Teleport(spawnPos, pos?.W ?? 0f, false);
+                    await Tools.SpawnVehicle(_lastVehicleModel ?? _defaultVehicle, true);
+                }
+#endif
+                Main.Instance.AttachTick(RecordingPlaybackCheckerThread);
 
                 // Load the recording with a function call, because the FiveM native doesn't take the name parameter
                 API.RequestVehicleRecording(id, name);
@@ -780,8 +1048,9 @@ namespace RecM
                 if (!Function.Call<bool>(Hash.HAS_VEHICLE_RECORDING_BEEN_LOADED, id, name))
                 {
                     IsLoadingRecording = false;
+                    IsPlaybackGoingOn = false;
                     "The recording failed to load.".Error(true);
-                    Main.Instance.DetachTick(RecordingCheckerThread);
+                    Main.Instance.DetachTick(RecordingPlaybackCheckerThread);
                     return;
                 }
 
@@ -789,19 +1058,12 @@ namespace RecM
                 if (!API.IsPlaybackGoingOnForVehicle(veh.Handle) || _lastLocation == null)
                 {
                     // If switching to another playback, we don't want this resetting mid sequence
-                    if (!isSwitching)
+                    if (!isSwitching && useMyPlayer)
                         _lastLocation = new Vector4(veh.Position, veh.Heading);
                 }
 
-                // Now, teleport the player ONLY if there's given coords (which is mostly likely from the custom recordings)
-                if (pos != null)
-                    await Tools.Teleport((Vector3)pos, pos.Value.W, false);
-
                 // Play the recording
                 API.StartPlaybackRecordedVehicle(veh.Handle, id, name, true);
-
-                // I have no idea what it does, but it's in that other yvr recorder script
-                API.SetVehicleActiveDuringPlayback(veh.Handle, true);
 
                 // Store it as our last used recording
                 _lastRecordingPlayed = new Tuple<int, string>(id, name);
@@ -810,16 +1072,16 @@ namespace RecM
                 _currRecordingPlaybackStartTime = Game.GameTime;
 
                 // The total duration of the recording
-                _currRecordingDuration = Function.Call<float>(Hash.GET_TOTAL_DURATION_OF_VEHICLE_RECORDING, id, name);
+                _currRecordingPlaybackDuration = Function.Call<float>(Hash.GET_TOTAL_DURATION_OF_VEHICLE_RECORDING, id, name);
 
                 // Make sure to set the playback speed
                 SwitchPlaybackSpeed(_currPlaybackSpeedIndex);
 
                 // Store the positions every 120ms of the recording
-                for (float time = 0; time <= _currRecordingDuration; time += 120)
+                for (float time = 0; time <= _currRecordingPlaybackDuration; time += 120)
                 {
                     Vector3 position = API.GetPositionOfVehicleRecordingAtTime(id, time, name);
-                    _currRecordingPositions.Add(position);
+                    _currRecordingPlaybackPositions.Add(position);
                 }
 
                 // Reset things
@@ -839,11 +1101,9 @@ namespace RecM
 
         public static void SwitchRecordingPlayback()
         {
-            if (!Game.PlayerPed.IsInVehicle()) return;
-            if (Game.PlayerPed.CurrentVehicle == null) return;
-            if (!Game.PlayerPed.CurrentVehicle.Exists()) return;
-            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return;
-            var veh = Game.PlayerPed.CurrentVehicle;
+            if (_currentPlaybackVehicle == null) return;
+            if (!_currentPlaybackVehicle.Exists()) return;
+            var veh = _currentPlaybackVehicle;
 
             // Remove the recording from memory
             if (_lastRecordingPlayed != null)
@@ -851,7 +1111,9 @@ namespace RecM
 
             // Reset things
             _lastRecordingPlayed = null;
-            _currRecordingPositions.Clear();
+            _currRecordingPlaybackPositions.Clear();
+            _chaseMode = false;
+            _chaseRubberband = false;
 
             // Stop the playback
             if (API.IsPlaybackGoingOnForVehicle(veh.Handle))
@@ -860,70 +1122,16 @@ namespace RecM
 
         #endregion
 
-        #region Delete recording
-
-        public static async Task<bool> DeleteRecording(string name, string model)
-        {
-            // Latent event that sends little increments of data to the server
-            (bool success, string msg) = await EventDispatcher.Get<Tuple<bool, string>>("RecM:deleteRecording:Server", name, model);
-            if (!success)
-            {
-                msg.Error(true);
-                return false;
-            }
-
-            // Notify the client of the recording being deleted
-            $"Recording {name} successfully deleted!".Log(true);
-
-            return true;
-        }
-
-        #endregion
-
         #region Stop recording playback
 
         public async static void StopRecordingPlayback()
         {
-            if (_lastRecordingPlayed == null)
+            if (!IsPlaybackGoingOn)
             {
                 "There's no recording being played at this moment.".Error(true);
                 return;
             }
-            if (!Game.PlayerPed.IsInVehicle()) return;
-            if (Game.PlayerPed.CurrentVehicle == null) return;
-            if (!Game.PlayerPed.CurrentVehicle.Exists()) return;
-            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return;
-            var veh = Game.PlayerPed.CurrentVehicle;
-
-            // Remove the recording from memory
-            if (_lastRecordingPlayed != null)
-                API.RemoveVehicleRecording(_lastRecordingPlayed.Item1, _lastRecordingPlayed.Item2);
-
-            // Reset things
-            _lastRecordingPlayed = null;
-            _currRecordingPositions.Clear();
-
-            // Stop the playback
-            API.StopPlaybackRecordedVehicle(veh.Handle);
-
-            // Detach the tick
-            Main.Instance.DetachTick(RecordingCheckerThread);
-
-            // Attempt to spawn the player's last vehicle
-            if (_lastVehicleModel != null && _lastVehicleModel != veh.DisplayName)
-                await Tools.SpawnVehicle(_lastVehicleModel, true);
-
-            // Teleport the player back to the last location
-            if (_lastLocation != null)
-                await Tools.Teleport((Vector3)_lastLocation, _lastLocation.Value.W, false);
-
-            // Reset player control flags
-            API.SetPlayerControl(Game.Player.Handle, true, 0);
-
-            // Conditional reset things
-            _lastLocation = null;
-            _lastVehicleModel = null;
-
+            Clean();
             "Recording stopped!".Log(true);
         }
 
@@ -955,62 +1163,149 @@ namespace RecM
 
         #region Get playback speed name
 
-        public static string GetPlaybackSpeedName() => $"{_playbackSpeeds[_currPlaybackSpeedIndex]}x";
+        public static string GetPlaybackSpeedName() => $"{(_playbackSpeeds[_currPlaybackSpeedIndex] == 0 ? "Paused" : $"Speed {_playbackSpeeds[_currPlaybackSpeedIndex]}x")}";
 
         #endregion
 
         #region Switch playback speed
 
-        public static void SwitchPlaybackSpeed(int index)
+        public static void SwitchPlaybackSpeed(int index, bool updateIndexes = true, bool updateMenu = true)
         {
-            _currPlaybackSpeedIndex = index;
-            if (_currPlaybackSpeedIndex >= _playbackSpeeds.Count)
+            if (updateIndexes)
             {
-                _currPlaybackSpeedIndex = _playbackSpeeds.Count - 1;
-                return;
-            }
-            else if (_currPlaybackSpeedIndex < 0)
-            {
-                _currPlaybackSpeedIndex = 0;
-                return;
+                _currPlaybackSpeedIndex = index;
+                if (_currPlaybackSpeedIndex >= _playbackSpeeds.Count)
+                {
+                    _currPlaybackSpeedIndex = _playbackSpeeds.Count - 1;
+                    return;
+                }
+                else if (_currPlaybackSpeedIndex < 0)
+                {
+                    _currPlaybackSpeedIndex = 0;
+                    return;
+                }
             }
             string speedName = GetPlaybackSpeedName();
-            float speedValue = GetPlaybackSpeedValue();
-            if (Game.PlayerPed.IsInVehicle() && Game.PlayerPed.CurrentVehicle != null && Game.PlayerPed.CurrentVehicle.Exists())
-                API.SetPlaybackSpeed(Game.PlayerPed.CurrentVehicle.Handle, speedValue);
-            RecordingManager.SwitchPlaybackSpeedDisplayBtn.Text = $"Speed {speedName}";
-            ScaleformUI.Main.InstructionalButtons.ForceUpdate();
-            if (speedValue != 0)
+            float speedValue = updateIndexes ? GetPlaybackSpeedValue() : _playbackSpeeds[index];
+            if (_currentPlaybackVehicle != null && _currentPlaybackVehicle.Exists())
             {
-
+                var veh = _currentPlaybackVehicle;
+                API.SetPlaybackSpeed(veh.Handle, speedValue);
+                var posInRecording = API.GetTimePositionInRecording(veh.Handle) / (speedValue == 0 ? 1 : speedValue);
+                _currRecordingPlaybackStartTime = Game.GameTime - posInRecording;
             }
-
-            var posInRecording = API.GetTimePositionInRecording(Game.PlayerPed.CurrentVehicle.Handle) / (speedValue == 0 ? 1 : speedValue);
-            _currRecordingPlaybackStartTime = Game.GameTime - posInRecording;
         }
 
 
         #endregion
 
+        #region Rubber band playback speed
+
+        public static void ControlPlaybackVehicleSpeedOld(Vehicle veh)
+        {
+            // Manipulate the playback vehicle's playback speed to speed up if the player's vehicle is close
+            float distance = Vector3.Distance(Game.PlayerPed.CurrentVehicle.Position, veh.Position);
+
+            // Default speed index
+            int defaultPlaybackSpeedIdx = GetPlaybackSpeedIndex();
+
+            // New speed index
+            int newPlaybackSpeedIdx = _playbackSpeeds.IndexOf(1.5f);
+
+            // Set the playback speed
+            if (distance < 10f)
+            {
+                if (!_isPlaybackRubberbanding)
+                {
+                    _isPlaybackRubberbanding = true;
+                    SwitchPlaybackSpeed(newPlaybackSpeedIdx, false, false);
+                }
+            }
+            else
+            {
+                if (_isPlaybackRubberbanding)
+                {
+                    _isPlaybackRubberbanding = false;
+                    SwitchPlaybackSpeed(defaultPlaybackSpeedIdx, false, false);
+                }
+            }
+
+        }
+
+        public static void ControlPlaybackVehicleSpeed(Vehicle veh)
+        {
+            // Rockstar-style catchup: linearly slow the recording the further behind the player is.
+            // 0m → 1.5x (player right on it, let it pull away)
+            // 20m → 1.0x (ideal following distance)
+            // 40m+ → 0.5x (player is falling behind, give them time to catch up)
+            float distance = Vector3.Distance(Game.PlayerPed.CurrentVehicle.Position, veh.Position);
+            float t = MathUtil.Clamp(distance / 40.0f, 0f, 1f);
+            float newPlaybackSpeed = MathUtil.Lerp(1.5f, 0.5f, t);
+            API.SetPlaybackSpeed(veh.Handle, newPlaybackSpeed);
+        }
+
+        #endregion
+
         #region Clean
 
-        private static void Clean()
+        private static async void Clean()
         {
-            if (!Game.PlayerPed.IsInVehicle()) return;
-            if (Game.PlayerPed.CurrentVehicle == null) return;
-            if (!Game.PlayerPed.CurrentVehicle.Exists()) return;
-            if (Game.PlayerPed.CurrentVehicle.GetPedOnSeat(VehicleSeat.Driver) != Game.PlayerPed) return;
-            var veh = Game.PlayerPed.CurrentVehicle;
+            var veh = _currentPlaybackVehicle;
 
+            // Remove the recording from memory
             if (_lastRecordingPlayed != null)
                 API.RemoveVehicleRecording(_lastRecordingPlayed.Item1, _lastRecordingPlayed.Item2);
-            if (!API.IsPlaybackGoingOnForVehicle(veh.Handle))
-            {
-                _lastLocation = null;
-                _lastVehicleModel = null;
-            }
+
+            // Reset things
+            IsPlaybackGoingOn = false;
             _lastRecordingPlayed = null;
-            _currRecordingPositions.Clear();
+            _currRecordingPlaybackPositions.Clear();
+            _chaseMode = false;
+            _chaseRubberband = false;
+
+            // Stop the playback
+            if (veh != null)
+                API.StopPlaybackRecordedVehicle(veh.Handle);
+
+            // Detach the tick
+            Main.Instance.DetachTick(RecordingPlaybackCheckerThread);
+
+            // Attempt to spawn the player's last vehicle (skip if already in one, e.g. after chase mode)
+            if (veh != null && _lastVehicleModel != null && _lastVehicleModel != veh.DisplayName && !Game.PlayerPed.IsInVehicle())
+                await Tools.SpawnVehicle(_lastVehicleModel, true);
+
+            // Teleport the player back to the last location
+            if (_lastLocation != null)
+                await Tools.Teleport((Vector3)_lastLocation, _lastLocation.Value.W, false);
+
+            // Only reset the vehicle if the player's vehicle is the playback vehicle
+            if (Game.PlayerPed.IsInVehicle())
+            {
+                if (Game.PlayerPed.CurrentVehicle != null && Game.PlayerPed.CurrentVehicle.Exists())
+                {
+                    if (veh != null && Game.PlayerPed.CurrentVehicle == veh)
+                    {
+                        veh.IsInvincible = false;
+                    }
+                    else
+                        veh?.Delete();
+                }
+                else
+                    veh?.Delete();
+            }
+            else
+                veh?.Delete();
+
+            // Reset player control flags
+            API.SetPedCanBeKnockedOffVehicle(Game.PlayerPed.Handle, 0);
+            Game.PlayerPed.IsInvincible = false;
+            API.SetPlayerControl(Game.Player.Handle, true, 0);
+
+            // Reset the last location & model
+            _lastLocation = null;
+            _lastVehicleModel = null;
+            _currentPlaybackVehicle = null;
+            OnPlaybackStateChanged?.Invoke(false);
         }
 
         #endregion

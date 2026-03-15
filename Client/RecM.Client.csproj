@@ -11,13 +11,11 @@
     </ItemGroup>
     <ItemGroup>
       <PackageReference Include="FxEvents.FiveM.Client" Version="3.0.1" />
+      <PackageReference Include="ScaleformUI" Version="5.8.0" />
     </ItemGroup>
     <ItemGroup>
       <Reference Include="Newtonsoft.Json">
         <HintPath>..\_dependencies\Newtonsoft.Json.dll</HintPath>
-      </Reference>
-      <Reference Include="ScaleformUI">
-        <HintPath>..\_dependencies\Client\ScaleformUI.dll</HintPath>
       </Reference>
     </ItemGroup>
     <ItemGroup>
