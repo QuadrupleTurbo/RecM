@@ -145,7 +145,14 @@ namespace RecM
         /// <summary>
         /// The current playback speed index.
         /// </summary>
-        private static int _currPlaybackSpeedIndex = _playbackSpeeds.IndexOf(1);
+        // Separate speed indices for vanilla and custom so they never bleed into each other
+        private static int _vanillaPlaybackSpeedIndex = _playbackSpeeds.IndexOf(1);
+        private static int _customPlaybackSpeedIndex = _playbackSpeeds.IndexOf(1);
+        private static int ActiveSpeedIndex
+        {
+            get => _isVanillaPlayback ? _vanillaPlaybackSpeedIndex : _customPlaybackSpeedIndex;
+            set { if (_isVanillaPlayback) _vanillaPlaybackSpeedIndex = value; else _customPlaybackSpeedIndex = value; }
+        }
 
         /// <summary>
         /// Whether the playback is rubberbanding or not.
@@ -156,6 +163,7 @@ namespace RecM
         /// Whether the current playback is in chase mode (player follows in their own vehicle).
         /// </summary>
         private static bool _chaseMode;
+        private static bool _isVanillaPlayback;
 
         /// <summary>
         /// Whether the current chase playback uses rubberband speed matching.
@@ -616,7 +624,7 @@ namespace RecM
                 var curr = TimeSpan.FromMilliseconds(currMs).ToString(@"mm\:ss");
                 var dur = TimeSpan.FromMilliseconds(_currRecordingPlaybackDuration).ToString(@"mm\:ss");
                 var modeLabel = _chaseRubberband ? "Chase Rubberband" : _chaseMode ? "Chase" : "Normal";
-                Screen.ShowSubtitle($"{(playbackSpeed == 0 ? "~r~Paused" : $"~g~{playbackSpeed}x")}  ~s~|  {(playbackSpeed < 0 && currMs <= 0 ? "00:00" : curr)} / {dur}  ~s~| {modeLabel}", 0);
+                Screen.ShowSubtitle($"{(playbackSpeed == 0 ? "~r~Paused" : $"~g~{playbackSpeed}x")}  ~s~|  {(playbackSpeed < 0 && currMs <= 0 ? "00:00" : curr)} / {dur}{(_isVanillaPlayback ? "" : $"  ~s~| {modeLabel}")}", 0);
                 for (int i = 0; i < _currRecordingPlaybackPositions.Count; i++)
                 {
                     Vector3 recPos = _currRecordingPlaybackPositions[i];
@@ -1013,6 +1021,10 @@ namespace RecM
                 // Store chase mode (must be after SwitchRecordingPlayback to avoid being reset)
                 _chaseMode = chaseMode || chaseRubberband;
                 _chaseRubberband = chaseRubberband;
+                _isVanillaPlayback = model == null;
+                // Reset vanilla speed to 1x on each new vanilla playback
+                if (_isVanillaPlayback)
+                    _vanillaPlaybackSpeedIndex = _playbackSpeeds.IndexOf(1);
                 OnPlaybackStateChanged?.Invoke(true);
 #if CLIENT
                 Game.PlayerPed.IsInvincible = true;
@@ -1075,7 +1087,7 @@ namespace RecM
                 _currRecordingPlaybackDuration = Function.Call<float>(Hash.GET_TOTAL_DURATION_OF_VEHICLE_RECORDING, id, name);
 
                 // Make sure to set the playback speed
-                SwitchPlaybackSpeed(_currPlaybackSpeedIndex);
+                SwitchPlaybackSpeed(ActiveSpeedIndex);
 
                 // Store the positions every 120ms of the recording
                 for (float time = 0; time <= _currRecordingPlaybackDuration; time += 120)
@@ -1151,37 +1163,51 @@ namespace RecM
 
         #region Get playback speed index
 
-        public static int GetPlaybackSpeedIndex() => _currPlaybackSpeedIndex;
+        public static int GetPlaybackSpeedIndex() => ActiveSpeedIndex;
+        public static int GetCustomPlaybackSpeedIndex() => _customPlaybackSpeedIndex;
 
         #endregion
 
         #region Get playback speed value
 
-        public static float GetPlaybackSpeedValue() => _playbackSpeeds[_currPlaybackSpeedIndex];
+        public static float GetPlaybackSpeedValue() => _playbackSpeeds[ActiveSpeedIndex];
 
         #endregion
 
         #region Get playback speed name
 
-        public static string GetPlaybackSpeedName() => $"{(_playbackSpeeds[_currPlaybackSpeedIndex] == 0 ? "Paused" : $"Speed {_playbackSpeeds[_currPlaybackSpeedIndex]}x")}";
+        public static string GetPlaybackSpeedName() => $"{(_playbackSpeeds[ActiveSpeedIndex] == 0 ? "Paused" : $"Speed {_playbackSpeeds[ActiveSpeedIndex]}x")}";
+        public static string GetCustomPlaybackSpeedName() => $"{(_playbackSpeeds[_customPlaybackSpeedIndex] == 0 ? "Paused" : $"Speed {_playbackSpeeds[_customPlaybackSpeedIndex]}x")}";
 
         #endregion
 
         #region Switch playback speed
 
+        public static void SwitchCustomPlaybackSpeed(int index)
+        {
+            _customPlaybackSpeedIndex = Math.Max(0, Math.Min(index, _playbackSpeeds.Count - 1));
+            // Only apply to the vehicle if custom is currently playing
+            if (!_isVanillaPlayback && _currentPlaybackVehicle != null && _currentPlaybackVehicle.Exists())
+            {
+                float speedValue = _playbackSpeeds[_customPlaybackSpeedIndex];
+                API.SetPlaybackSpeed(_currentPlaybackVehicle.Handle, speedValue);
+                _currRecordingPlaybackStartTime = Game.GameTime - API.GetTimePositionInRecording(_currentPlaybackVehicle.Handle) / (speedValue == 0 ? 1 : speedValue);
+            }
+        }
+
         public static void SwitchPlaybackSpeed(int index, bool updateIndexes = true, bool updateMenu = true)
         {
             if (updateIndexes)
             {
-                _currPlaybackSpeedIndex = index;
-                if (_currPlaybackSpeedIndex >= _playbackSpeeds.Count)
+                ActiveSpeedIndex = index;
+                if (ActiveSpeedIndex >= _playbackSpeeds.Count)
                 {
-                    _currPlaybackSpeedIndex = _playbackSpeeds.Count - 1;
+                    ActiveSpeedIndex = _playbackSpeeds.Count - 1;
                     return;
                 }
-                else if (_currPlaybackSpeedIndex < 0)
+                else if (ActiveSpeedIndex < 0)
                 {
-                    _currPlaybackSpeedIndex = 0;
+                    ActiveSpeedIndex = 0;
                     return;
                 }
             }
@@ -1262,6 +1288,9 @@ namespace RecM
             _currRecordingPlaybackPositions.Clear();
             _chaseMode = false;
             _chaseRubberband = false;
+            if (_isVanillaPlayback)
+                _vanillaPlaybackSpeedIndex = _playbackSpeeds.IndexOf(1); // reset vanilla for next time
+            _isVanillaPlayback = false;
 
             // Stop the playback
             if (veh != null)

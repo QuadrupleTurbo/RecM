@@ -165,7 +165,13 @@ namespace RecM.Client.Menus
                 _discardRecordingMenuItem.Enabled = false;
 
                 var ui = await Tools.GetUserInput("Enter a name for your recording", 30);
-                if (string.IsNullOrEmpty(ui)) return;
+                if (string.IsNullOrEmpty(ui))
+                {
+                    // User cancelled — restore buttons
+                    _saveRecordingMenuItem.Enabled = true;
+                    _discardRecordingMenuItem.Enabled = true;
+                    return;
+                }
                 if (!string.IsNullOrEmpty(ui))
                 {
                     // Join the words together since we can't have spaces in the name
@@ -394,7 +400,7 @@ namespace RecM.Client.Menus
                                 sender.SwitchTo(recordItemMenu, inheritOldMenuParams: true);
 
                                 // Update the playback speed display (best place to do it)
-                                ((UIMenuDynamicListItem)recordItemMenu.MenuItems.FirstOrDefault(x => x.Label.Equals("Playback Speed"))).CurrentListItem = Recording.GetPlaybackSpeedName().Replace("Speed ", "");
+                                ((UIMenuDynamicListItem)recordItemMenu.MenuItems.FirstOrDefault(x => x.Label.Equals("Playback Speed"))).CurrentListItem = Recording.GetCustomPlaybackSpeedName().Replace("Speed ", "");
                             };
 
                             UIMenuItem teleportItem = new UIMenuItem("Teleport", "Teleport to where this recording starts.");
@@ -413,24 +419,24 @@ namespace RecM.Client.Menus
                                 Recording.StartRecordingPlayback(id, $"{name}_{model}_", model: model, pos: pos, useMyPlayer: playItem.Index == 0, chaseMode: chase, chaseRubberband: chaseRubberband);
                             };
 
-                            var playbackSpeedItem = new UIMenuDynamicListItem("Playback Speed", "Change the playback speed.", Recording.GetPlaybackSpeedName().Replace("Speed ", ""), async (item, dir) =>
+                            var playbackSpeedItem = new UIMenuDynamicListItem("Playback Speed", "Change the playback speed.", Recording.GetCustomPlaybackSpeedName().Replace("Speed ", ""), async (item, dir) =>
                             {
                                 if (dir == ChangeDirection.Left)
                                 {
-                                    if (Recording.GetPlaybackSpeedIndex() == 0)
-                                        return Recording.GetPlaybackSpeedName().Replace("Speed ", "");
+                                    if (Recording.GetCustomPlaybackSpeedIndex() == 0)
+                                        return Recording.GetCustomPlaybackSpeedName().Replace("Speed ", "");
 
-                                    Recording.SwitchPlaybackSpeed(Recording.GetPlaybackSpeedIndex() - 1);
+                                    Recording.SwitchCustomPlaybackSpeed(Recording.GetCustomPlaybackSpeedIndex() - 1);
                                 }
                                 else if (dir == ChangeDirection.Right)
                                 {
-                                    if (Recording.GetPlaybackSpeedIndex() == Recording.GetPlaybackSpeedNameList().Count - 1)
-                                        return Recording.GetPlaybackSpeedName().Replace("Speed ", "");
+                                    if (Recording.GetCustomPlaybackSpeedIndex() == Recording.GetPlaybackSpeedNameList().Count - 1)
+                                        return Recording.GetCustomPlaybackSpeedName().Replace("Speed ", "");
 
-                                    Recording.SwitchPlaybackSpeed(Recording.GetPlaybackSpeedIndex() + 1);
+                                    Recording.SwitchCustomPlaybackSpeed(Recording.GetCustomPlaybackSpeedIndex() + 1);
                                 }
 
-                                return Recording.GetPlaybackSpeedName().Replace("Speed ", "");
+                                return Recording.GetCustomPlaybackSpeedName().Replace("Speed ", "");
                             });
                             recordItemMenu.AddItem(playbackSpeedItem);
 
